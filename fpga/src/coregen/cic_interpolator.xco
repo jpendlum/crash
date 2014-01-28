@@ -1,0 +1,75 @@
+##############################################################
+#
+# Xilinx Core Generator version 14.6
+# Date: Tue Jan 21 18:55:18 2014
+#
+##############################################################
+#
+#  This file contains the customisation parameters for a
+#  Xilinx CORE Generator IP GUI. It is strongly recommended
+#  that you do not manually alter this file as it may cause
+#  unexpected and unsupported behavior.
+#
+##############################################################
+#
+#  Generated from component: xilinx.com:ip:cic_compiler:2.0
+#
+##############################################################
+#
+# BEGIN Project Options
+SET addpads = false
+SET asysymbol = true
+SET busformat = BusFormatAngleBracketNotRipped
+SET createndf = false
+SET designentry = Verilog
+SET device = xc7z045
+SET devicefamily = zynq
+SET flowvendor = Foundation_ISE
+SET formalverification = false
+SET foundationsym = false
+SET implementationfiletype = Ngc
+SET package = ffg900
+SET removerpms = false
+SET simulationfiles = Behavioral
+SET speedgrade = -2
+SET verilogsim = true
+SET vhdlsim = false
+# END Project Options
+# BEGIN Select
+SELECT CIC_Compiler xilinx.com:ip:cic_compiler:2.0
+# END Select
+# BEGIN Parameters
+CSET ce=false
+CSET clock_frequency=200.0
+CSET component_name=cic_interpolator
+CSET differential_delay=1
+CSET filter_type=Interpolation
+CSET fixed_or_initial_rate=4
+CSET gui_behaviour=Coregen
+CSET hardwareoversamplingrate=1
+CSET input_data_width=20
+CSET input_sample_frequency=0.001
+CSET maximum_rate=2047
+CSET minimum_rate=4
+CSET nd=true
+CSET number_of_channels=1
+CSET number_of_stages=3
+CSET output_data_width=42
+CSET passband_max=0.5
+CSET passband_min=0.0
+CSET quantization=Full_Precision
+CSET ratespecification=Sample_Period
+CSET response_magnitude=Normalized
+CSET sample_rate_changes=Programmable
+CSET sampleperiod=4
+CSET sclr=true
+CSET stopband_max=1.0
+CSET stopband_min=0.5
+CSET use_streaming_interface=true
+CSET use_xtreme_dsp_slice=true
+# END Parameters
+# BEGIN Extra information
+MISC pkg_timestamp=2013-06-08T22:40:34Z
+# END Extra information
+GENERATE
+# CRC: df2b86ff

@@ -1,0 +1,44 @@
+##################################################
+# User sources
+#
+# Notes: Do not include your toplevel file or
+#        the XPS project files. Those are included
+#        in the base Makefile since each project
+#        uses a specific toplevel file.
+#        Coregen files can be included with their
+#        .xco files.
+##################################################
+FPGA_SRCS = $(abspath $(addprefix $(BASE_DIR)/src/, \
+bpsk_mod/bpsk_mod.vhd \
+common/debounce.vhd \
+common/synchronizer_slv.vhd \
+common/synchronizer.vhd \
+common/edge_detect.vhd \
+common/trunc_unbiased.vhd \
+ps_pl_interface/axi_lite_to_parallel_bus.vhd \
+ps_pl_interface/ps_pl_interface.vhd \
+spectrum_sense/spectrum_sense.vhd \
+uart/uart.vhd \
+usrp_ddr_intf/usrp_ddr_intf.vhd \
+usrp_ddr_intf/usrp_ddr_intf_axis.vhd \
+coregen/add_floating_point.xco \
+coregen/axis_interconnect_8x8.xco \
+coregen/cic_decimator.xco \
+coregen/cic_interpolator.xco \
+coregen/fft_axis.xco \
+coregen/fifo_8x64.xco \
+coregen/fifo_32x16.xco \
+coregen/fifo_72x64.xco \
+coregen/fifo_64x4096.xco \
+coregen/fir_halfband_decimator.xco \
+coregen/fir_halfband_interpolator.xco \
+coregen/fix1_31_to_float32.xco \
+coregen/float32_to_fix1_31.xco \
+coregen/gteq_floating_point.xco \
+coregen/mmcm_ddr_to_sdr.xco \
+coregen/mult_rx_gain_adjust.xco \
+coregen/mult_tx_gain_adjust.xco \
+coregen/multiply_floating_point.xco \
+coregen/sqrt_floating_point.xco \
+coregen/xlnx_axi_datamover.xco \
+))

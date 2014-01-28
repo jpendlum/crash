@@ -1,0 +1,263 @@
+#------------------------------------------------------------------------------
+#-  Copyright 2013-2014 Jonathon Pendlum
+#-
+#-  This is free software: you can redistribute it and/or modify
+#-  it under the terms of the GNU General Public License as published by
+#-  the Free Software Foundation, either version 3 of the License, or
+#-  (at your option) any later version.
+#-
+#-  This is distributed in the hope that it will be useful,
+#-  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#-  GNU General Public License for more details.
+#-
+#-  You should have received a copy of the GNU General Public License
+#-  along with this program.  If not, see <http://www.gnu.org/licenses/>.
+#-
+#-
+#-  File: zc706.ucf
+#-  Author: Jonathon Pendlum (jon.pendlum@gmail.com)
+#-  Description: UCF constraints for Xilinx ZC706 Development Board
+#-               Use connector J2 on Custom PCB.
+#------------------------------------------------------------------------------
+
+# -----------------------------------------------------------------------------
+# USRP Debug Port and ZC706 Interface
+# -----------------------------------------------------------------------------
+
+# All I/O in Bank 13
+# FMC_HPC_LA00_CC_N, Routed reverse polarity on Custom PCB (N->P)
+NET "RX_DATA_CLK_N" LOC = AG20;
+NET "RX_DATA_CLK_N" IOSTANDARD = LVDS_25;
+# FMC_HPC_LA00_CC_P, Routed reverse polarity on Custom PCB (P->N)
+NET "RX_DATA_CLK_P" LOC = AF20;
+NET "RX_DATA_CLK_P" IOSTANDARD = LVDS_25;
+# FMC_HPC_LA02_N
+NET "RX_DATA_N[0]" LOC = AK18;
+NET "RX_DATA_N[0]" IOSTANDARD = LVDS_25;
+# FMC_HPC_LA02_P
+NET "RX_DATA_P[0]" LOC = AK17;
+NET "RX_DATA_P[0]" IOSTANDARD = LVDS_25;
+# FMC_HPC_LA03_N
+NET "RX_DATA_N[1]" LOC = AJ19;
+NET "RX_DATA_N[1]" IOSTANDARD = LVDS_25;
+# FMC_HPC_LA03_P
+NET "RX_DATA_P[1]" LOC = AH19;
+NET "RX_DATA_P[1]" IOSTANDARD = LVDS_25;
+# FMC_HPC_LA04_N
+NET "RX_DATA_N[2]" LOC = AK20;
+NET "RX_DATA_N[2]" IOSTANDARD = LVDS_25;
+# FMC_HPC_LA04_P
+NET "RX_DATA_P[2]" LOC = AJ20;
+NET "RX_DATA_P[2]" IOSTANDARD = LVDS_25;
+# FMC_HPC_LA05_N
+NET "RX_DATA_N[3]" LOC = AH24;
+NET "RX_DATA_N[3]" IOSTANDARD = LVDS_25;
+# FMC_HPC_LA05_P
+NET "RX_DATA_P[3]" LOC = AH23;
+NET "RX_DATA_P[3]" IOSTANDARD = LVDS_25;
+# FMC_HPC_LA06_N
+NET "RX_DATA_N[4]" LOC = AH22;
+NET "RX_DATA_N[4]" IOSTANDARD = LVDS_25;
+# FMC_HPC_LA06_P
+NET "RX_DATA_P[4]" LOC = AG22;
+NET "RX_DATA_P[4]" IOSTANDARD = LVDS_25;
+# FMC_HPC_LA07_N
+NET "RX_DATA_N[5]" LOC = AJ24;
+NET "RX_DATA_N[5]" IOSTANDARD = LVDS_25;
+# FMC_HPC_LA07_P
+NET "RX_DATA_P[5]" LOC = AJ23;
+NET "RX_DATA_P[5]" IOSTANDARD = LVDS_25;
+# FMC_HPC_LA08_N
+NET "RX_DATA_N[6]" LOC = AG19;
+NET "RX_DATA_N[6]" IOSTANDARD = LVDS_25;
+# FMC_HPC_LA08_P
+NET "RX_DATA_P[6]" LOC = AF19;
+NET "RX_DATA_P[6]" IOSTANDARD = LVDS_25;
+# FMC_HPC_LA01_CC_N
+NET "TX_DATA_N[0]" LOC = AH21;
+NET "TX_DATA_N[0]" IOSTANDARD = LVDS_25;
+# FMC_HPC_LA01_CC_P
+NET "TX_DATA_P[0]" LOC = AG21;
+NET "TX_DATA_P[0]" IOSTANDARD = LVDS_25;
+# FMC_HPC_LA09_N
+NET "TX_DATA_N[1]" LOC = AE21;
+NET "TX_DATA_N[1]" IOSTANDARD = LVDS_25;
+# FMC_HPC_LA09_P
+NET "TX_DATA_P[1]" LOC = AD21;
+NET "TX_DATA_P[1]" IOSTANDARD = LVDS_25;
+# FMC_HPC_LA11_N
+NET "TX_DATA_N[2]" LOC = AE23;
+NET "TX_DATA_N[2]" IOSTANDARD = LVDS_25;
+# FMC_HPC_LA11_P
+NET "TX_DATA_P[2]" LOC = AD23;
+NET "TX_DATA_P[2]" IOSTANDARD = LVDS_25;
+# FMC_HPC_LA12_N
+NET "TX_DATA_N[3]" LOC = AF24;
+NET "TX_DATA_N[3]" IOSTANDARD = LVDS_25;
+# FMC_HPC_LA12_P
+NET "TX_DATA_P[3]" LOC = AF23;
+NET "TX_DATA_P[3]" IOSTANDARD = LVDS_25;
+# FMC_HPC_LA13_N
+NET "TX_DATA_N[4]" LOC = AA23;
+NET "TX_DATA_N[4]" IOSTANDARD = LVDS_25;
+# FMC_HPC_LA13_P
+NET "TX_DATA_P[4]" LOC = AA22;
+NET "TX_DATA_P[4]" IOSTANDARD = LVDS_25;
+# FMC_HPC_LA14_N
+NET "TX_DATA_N[5]" LOC = AD24;
+NET "TX_DATA_N[5]" IOSTANDARD = LVDS_25;
+# FMC_HPC_LA14_P
+NET "TX_DATA_P[5]" LOC = AC24;
+NET "TX_DATA_P[5]" IOSTANDARD = LVDS_25;
+# FMC_HPC_LA15_N
+NET "TX_DATA_N[6]" LOC = Y23;
+NET "TX_DATA_N[6]" IOSTANDARD = LVDS_25;
+# FMC_HPC_LA15_P
+NET "TX_DATA_P[6]" LOC = Y22;
+NET "TX_DATA_P[6]" IOSTANDARD = LVDS_25;
+# FMC_HPC_LA16_N
+NET "TX_DATA_N[7]" LOC = AB24;
+NET "TX_DATA_N[7]" IOSTANDARD = LVDS_25;
+# FMC_HPC_LA16_P
+NET "TX_DATA_P[7]" LOC = AA24;
+NET "TX_DATA_P[7]" IOSTANDARD = LVDS_25;
+# FMC_HPC_LA10_N, Not a differential pair on USRP
+NET "UART_TX" LOC = AG25;
+NET "UART_TX" IOSTANDARD = LVCMOS25;
+# FMC_HPC_LA10_P, Not a differential pair on USRP
+NET "SPARE" LOC = AG24;
+NET "SPARE" IOSTANDARD = LVCMOS25;
+
+NET "DDR_Addr[0]" LOC = L25;
+NET "DDR_Addr[1]" LOC = K26;
+NET "DDR_Addr[2]" LOC = L27;
+NET "DDR_Addr[3]" LOC = G25;
+NET "DDR_Addr[4]" LOC = J26;
+NET "DDR_Addr[5]" LOC = G24;
+NET "DDR_Addr[6]" LOC = H26;
+NET "DDR_Addr[7]" LOC = K22;
+NET "DDR_Addr[8]" LOC = F27;
+NET "DDR_Addr[9]" LOC = J23;
+NET "DDR_Addr[10]" LOC = G26;
+NET "DDR_Addr[11]" LOC = H24;
+NET "DDR_Addr[12]" LOC = K23;
+NET "DDR_Addr[13]" LOC = H23;
+NET "DDR_Addr[14]" LOC = J24;
+NET "DDR_BankAddr[0]" LOC = M27;
+NET "DDR_BankAddr[1]" LOC = M26;
+NET "DDR_BankAddr[2]" LOC = M25;
+NET "DDR_CAS_n" LOC = M24;
+NET "DDR_CKE" LOC = M22;
+NET "DDR_CS_n" LOC = N22;
+NET "DDR_Clk" LOC = K25;
+NET "DDR_Clk_n" LOC = J25;
+NET "DDR_DM[0]" LOC = C27;
+NET "DDR_DM[1]" LOC = B30;
+NET "DDR_DM[2]" LOC = H29;
+NET "DDR_DM[3]" LOC = K28;
+NET "DDR_DQ[0]" LOC = A25;
+NET "DDR_DQ[1]" LOC = E25;
+NET "DDR_DQ[2]" LOC = B27;
+NET "DDR_DQ[3]" LOC = D25;
+NET "DDR_DQ[4]" LOC = B25;
+NET "DDR_DQ[5]" LOC = E26;
+NET "DDR_DQ[6]" LOC = D26;
+NET "DDR_DQ[7]" LOC = E27;
+NET "DDR_DQ[8]" LOC = A29;
+NET "DDR_DQ[9]" LOC = A27;
+NET "DDR_DQ[10]" LOC = A30;
+NET "DDR_DQ[11]" LOC = A28;
+NET "DDR_DQ[12]" LOC = C28;
+NET "DDR_DQ[13]" LOC = D30;
+NET "DDR_DQ[14]" LOC = D28;
+NET "DDR_DQ[15]" LOC = D29;
+NET "DDR_DQ[16]" LOC = H27;
+NET "DDR_DQ[17]" LOC = G27;
+NET "DDR_DQ[18]" LOC = H28;
+NET "DDR_DQ[19]" LOC = E28;
+NET "DDR_DQ[20]" LOC = E30;
+NET "DDR_DQ[21]" LOC = F28;
+NET "DDR_DQ[22]" LOC = G30;
+NET "DDR_DQ[23]" LOC = F30;
+NET "DDR_DQ[24]" LOC = J29;
+NET "DDR_DQ[25]" LOC = K27;
+NET "DDR_DQ[26]" LOC = J30;
+NET "DDR_DQ[27]" LOC = J28;
+NET "DDR_DQ[28]" LOC = K30;
+NET "DDR_DQ[29]" LOC = M29;
+NET "DDR_DQ[30]" LOC = L30;
+NET "DDR_DQ[31]" LOC = M30;
+NET "DDR_DQS[0]" LOC = C26;
+NET "DDR_DQS[1]" LOC = C29;
+NET "DDR_DQS[2]" LOC = G29;
+NET "DDR_DQS[3]" LOC = L28;
+NET "DDR_DQS_n[0]" LOC = B26;
+NET "DDR_DQS_n[1]" LOC = B29;
+NET "DDR_DQS_n[2]" LOC = F29;
+NET "DDR_DQS_n[3]" LOC = L29;
+NET "DDR_DRSTB" LOC = F25;
+NET "DDR_ODT" LOC = L23;
+NET "DDR_RAS_n" LOC = N24;
+NET "DDR_VRN" LOC = N21;
+NET "DDR_VRP" LOC = M21;
+NET "DDR_WEB_pin" LOC = N23;
+NET "MIO[0]" LOC = F24;
+NET "MIO[1]" LOC = D23;
+NET "MIO[2]" LOC = F23;
+NET "MIO[3]" LOC = C23;
+NET "MIO[4]" LOC = E23;
+NET "MIO[5]" LOC = C24;
+NET "MIO[6]" LOC = D24;
+NET "MIO[7]" LOC = B24;
+NET "MIO[8]" LOC = C21;
+NET "MIO[9]" LOC = A24;
+NET "MIO[10]" LOC = E22;
+NET "MIO[11]" LOC = A23;
+NET "MIO[12]" LOC = E21;
+NET "MIO[13]" LOC = F22;
+NET "MIO[14]" LOC = B22;
+NET "MIO[15]" LOC = C22;
+NET "MIO[16]" LOC = L19;
+NET "MIO[17]" LOC = K21;
+NET "MIO[18]" LOC = K20;
+NET "MIO[19]" LOC = J20;
+NET "MIO[20]" LOC = M20;
+NET "MIO[21]" LOC = J19;
+NET "MIO[22]" LOC = L20;
+NET "MIO[23]" LOC = J21;
+NET "MIO[24]" LOC = M19;
+NET "MIO[25]" LOC = G19;
+NET "MIO[26]" LOC = M17;
+NET "MIO[27]" LOC = G20;
+NET "MIO[28]" LOC = L17;
+NET "MIO[29]" LOC = H22;
+NET "MIO[30]" LOC = L18;
+NET "MIO[31]" LOC = H21;
+NET "MIO[32]" LOC = K17;
+NET "MIO[33]" LOC = G22;
+NET "MIO[34]" LOC = K18;
+NET "MIO[35]" LOC = G21;
+NET "MIO[36]" LOC = H17;
+NET "MIO[37]" LOC = B21;
+NET "MIO[38]" LOC = A20;
+NET "MIO[39]" LOC = F18;
+NET "MIO[40]" LOC = B20;
+NET "MIO[41]" LOC = J18;
+NET "MIO[42]" LOC = D20;
+NET "MIO[43]" LOC = E18;
+NET "MIO[44]" LOC = E20;
+NET "MIO[45]" LOC = H18;
+NET "MIO[46]" LOC = F20;
+NET "MIO[47]" LOC = A18;
+NET "MIO[48]" LOC = C19;
+NET "MIO[49]" LOC = D18;
+NET "MIO[50]" LOC = A19;
+NET "MIO[51]" LOC = F19;
+NET "MIO[52]" LOC = D19;
+NET "MIO[53]" LOC = C18;
+
+# PlanAhead Generated physical constraints
+
+INST "inst_usrp_ddr_intf_axis/inst_usrp_ddr_intf/inst_rx_mmcm_ddr_to_sdr/mmcm_adv_inst" LOC = MMCME2_ADV_X0Y0;
+INST "inst_usrp_ddr_intf_axis/inst_usrp_ddr_intf/inst_tx_mmcm_ddr_to_sdr/mmcm_adv_inst" LOC = MMCME2_ADV_X1Y6;

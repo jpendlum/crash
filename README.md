@@ -3,4 +3,4 @@ CRASH
 
 Cognitive Radio Accelerated with Software and Hardware
 
-Licensed under LGPLv3
+Licensed under GPLv3
