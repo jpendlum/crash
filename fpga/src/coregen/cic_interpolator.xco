@@ -1,7 +1,7 @@
 ##############################################################
 #
-# Xilinx Core Generator version 14.6
-# Date: Tue Jan 21 18:55:18 2014
+# Xilinx Core Generator version 14.7
+# Date: Thu Feb 13 03:54:26 2014
 #
 ##############################################################
 #
@@ -21,7 +21,7 @@ SET addpads = false
 SET asysymbol = true
 SET busformat = BusFormatAngleBracketNotRipped
 SET createndf = false
-SET designentry = Verilog
+SET designentry = VHDL
 SET device = xc7z045
 SET devicefamily = zynq
 SET flowvendor = Foundation_ISE
@@ -32,8 +32,8 @@ SET package = ffg900
 SET removerpms = false
 SET simulationfiles = Behavioral
 SET speedgrade = -2
-SET verilogsim = true
-SET vhdlsim = false
+SET verilogsim = false
+SET vhdlsim = true
 # END Project Options
 # BEGIN Select
 SELECT CIC_Compiler xilinx.com:ip:cic_compiler:2.0
@@ -69,7 +69,7 @@ CSET use_streaming_interface=true
 CSET use_xtreme_dsp_slice=true
 # END Parameters
 # BEGIN Extra information
-MISC pkg_timestamp=2013-06-08T22:40:34Z
+MISC pkg_timestamp=2013-10-13T18:12:46Z
 # END Extra information
 GENERATE
-# CRC: df2b86ff
+# CRC: 6b8017f5

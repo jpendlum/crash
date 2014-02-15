@@ -46,9 +46,9 @@
 --               the USRP that receives RX/ADC data and injects our TX/DAC data.
 --
 --               The RX and TX filter paths use two FIR and one CIC filter
---               per path per I & Q. This reuslts in 8 FIR filters and 4
---               CIC filters. The FIR filters are half-band 31 point filters
---               with +40 dB out of band attenuation.
+--               per path per I & Q. This results in 8 FIR filters and 4
+--               CIC filters. The FIR filters are half-band 23 tap filters
+--               with +60 dB out of band attenuation.
 --
 --               Note: The USRP operates at 100 MHz.
 -------------------------------------------------------------------------------
@@ -65,20 +65,26 @@ entity usrp_ddr_intf is
     BAUD                    : integer := 115200);     -- UART baud rate
   port (
     reset                   : in    std_logic;                      -- Asynchronous reset
-    -- Control registers (internally synchronized to clk_ddr clock domain)
-    usrp_mode_ctrl_reg      : in    std_logic_vector(7 downto 0);   -- USRP Mode
-    usrp_mode_ctrl_reg_en   : in    std_logic;                      -- USRP Mode data valid, hold until uart_busy asserts
-    usrp_mode_ctrl_reg_ack  : out   std_logic;                      -- USRP Mode register acknowledge
-    rx_fix2float_bypass     : in    std_logic;                      -- Bypass RX fixed point to floating point converter
-    rx_gain_reg             : in    std_logic_vector(31 downto 0);  -- Scales decimating CIC filter output
-    rx_decim_reg            : in    std_logic_vector(12 downto 0);  -- Receive decimation rate: 2,4, or n*4
-    rx_decim_en             : in    std_logic;                      -- Set decimation rate
-    rx_decim_ack            : out   std_logic;                      -- Set decimation rate acknowledge
-    tx_float2fix_bypass     : in    std_logic;                      -- Bypass TX floating point to fixed point converter
-    tx_gain_reg             : in    std_logic_vector(31 downto 0);  -- Scales interpolating CIC filter output
-    tx_interp_reg           : in    std_logic_vector(12 downto 0);  -- Transmit interpolation rate: 2,4, or n*4
-    tx_interp_en            : in    std_logic;                      -- Set interpolation rate
-    tx_interp_ack           : out   std_logic;                      -- Set interpolation rate acknowledge
+    -- Control registers (internally synchronized to clk_rx clock domain)
+    usrp_mode_ctrl          : in    std_logic_vector(7 downto 0);   -- USRP Mode
+    usrp_mode_ctrl_en       : in    std_logic;                      -- USRP Mode data valid, hold until acknowledge
+    usrp_mode_ctrl_ack      : out   std_logic;                      -- USRP Mode register acknowledge
+    rx_enable               : in    std_logic;                      -- Enable RX processing chain (clears resets)
+    rx_gain                 : in    std_logic_vector(31 downto 0);  -- Scales decimating CIC filter output
+    rx_cic_decim            : in    std_logic_vector(10 downto 0);  -- Receive CIC decimation rate
+    rx_cic_decim_en         : in    std_logic;                      -- Set receive CIC decimation rate
+    rx_cic_decim_ack        : out   std_logic;                      -- Set receive CIC decimation rate acknowledge
+    rx_fix2float_bypass     : in    std_logic;                      -- Bypass RX fixed to floating point conversion
+    rx_cic_bypass           : in    std_logic;                      -- Bypass RX CIC filter
+    rx_hb_bypass            : in    std_logic;                      -- Bypass RX half band filter
+    tx_enable               : in    std_logic;                      -- Enable TX processing chain (clears resets)
+    tx_gain                 : in    std_logic_vector(31 downto 0);  -- Scales interpolating CIC filter output
+    tx_cic_interp           : in    std_logic_vector(10 downto 0);  -- Transmit CIC interpolation rate
+    tx_cic_interp_en        : in    std_logic;                      -- Set transmit CIC interpolation rate
+    tx_cic_interp_ack       : out   std_logic;                      -- Set transmit CIC interpolation rate acknowledge
+    tx_float2fix_bypass     : in    std_logic;                      -- Bypass TX floating to fixed point conversion
+    tx_cic_bypass           : in    std_logic;                      -- Bypass TX CIC filter
+    tx_hb_bypass            : in    std_logic;                      -- Bypass TX half band filter
     -- UART output signals
     uart_busy               : out   std_logic;                      -- UART busy
     UART_TX                 : out   std_logic;                      -- UART
@@ -312,14 +318,15 @@ architecture RTL of usrp_ddr_intf is
       sclr              : in    std_logic;
       clk               : in    std_logic;
       nd                : in    std_logic;
+      ce                : in    std_logic;
       rfd               : out   std_logic;
       rdy               : out   std_logic;
       data_valid        : out   std_logic;
-      din               : in    std_logic_vector(31 downto 0);
-      dout              : out   std_logic_vector(31 downto 0));
+      din               : in    std_logic_vector(19 downto 0);
+      dout              : out   std_logic_vector(19 downto 0));
   end component;
 
-  component float32_to_fix1_31 is
+  component float32_to_fix1_19 is
     port (
       a                 : in    std_logic_vector(31 downto 0);
       clk               : in    std_logic;
@@ -327,7 +334,7 @@ architecture RTL of usrp_ddr_intf is
       operation_nd      : in    std_logic;
       operation_rfd     : out   std_logic;
       rdy               : out   std_logic;
-      result            : out   std_logic_vector(31 downto 0));
+      result            : out   std_logic_vector(19 downto 0));
   end component;
 
   component trunc_unbiased is
@@ -392,37 +399,48 @@ architecture RTL of usrp_ddr_intf is
   signal rx_mmcm_phase                : integer range 0 to 559;
   signal tx_mmcm_phase                : integer range 0 to 559;
 
-  signal rx_async                     : std_logic_vector(65 downto 0);
-  signal rx_sync                      : std_logic_vector(65 downto 0);
-  signal rx_async_rising              : std_logic_vector(3 downto 0);
-  signal rx_sync_rising               : std_logic_vector(3 downto 0);
-  signal tx_async                     : std_logic_vector(57 downto 0);
-  signal tx_sync                      : std_logic_vector(57 downto 0);
-  signal tx_async_rising              : std_logic_vector(2 downto 0);
-  signal tx_sync_rising               : std_logic_vector(2 downto 0);
+  signal rx_async                     : std_logic_vector(67 downto 0);
+  signal rx_sync                      : std_logic_vector(67 downto 0);
+  signal rx_async_rising              : std_logic_vector(4 downto 0);
+  signal rx_sync_rising               : std_logic_vector(4 downto 0);
+  signal tx_async                     : std_logic_vector(58 downto 0);
+  signal tx_sync                      : std_logic_vector(58 downto 0);
+  signal tx_async_rising              : std_logic_vector(3 downto 0);
+  signal tx_sync_rising               : std_logic_vector(3 downto 0);
   signal rx_phase_init_sync           : std_logic_vector(9 downto 0);
   signal rx_phase_incdec_sync         : std_logic;
   signal rx_phase_en_sync             : std_logic;
   signal tx_phase_init_sync           : std_logic_vector(9 downto 0);
   signal tx_phase_incdec_sync         : std_logic;
   signal tx_phase_en_sync             : std_logic;
-  signal usrp_mode_ctrl_reg_sync      : std_logic_vector(7 downto 0);
-  signal usrp_mode_ctrl_reg_en_sync   : std_logic;
+  signal usrp_mode_ctrl_sync          : std_logic_vector(7 downto 0);
+  signal usrp_mode_ctrl_en_sync       : std_logic;
+  signal usrp_mode_ctrl_stb           : std_logic;
   signal rx_fix2float_bypass_sync     : std_logic;
-  signal rx_decim_reg_sync            : std_logic_vector(12 downto 0);
-  signal rx_gain_reg_sync             : std_logic_vector(31 downto 0);
-  signal rx_decim_en_sync             : std_logic;
+  signal rx_cic_bypass_sync           : std_logic;
+  signal rx_hb_bypass_sync            : std_logic;
+  signal rx_cic_decim_sync            : std_logic_vector(10 downto 0);
+  signal rx_cic_decim_en_sync         : std_logic;
+  signal rx_cic_decim_stb             : std_logic;
+  signal rx_gain_sync                 : std_logic_vector(31 downto 0);
   signal tx_float2fix_bypass_sync     : std_logic;
-  signal tx_interp_reg_sync           : std_logic_vector(12 downto 0);
-  signal tx_gain_reg_sync             : std_logic_vector(31 downto 0);
-  signal tx_interp_en_sync            : std_logic;
-  signal rx_fifo_reset_sync           : std_logic;
-  signal tx_fifo_reset_sync           : std_logic;
-  signal usrp_mode_ctrl_reg_ack_int   : std_logic;
+  signal tx_cic_bypass_sync           : std_logic;
+  signal tx_hb_bypass_sync            : std_logic;
+  signal tx_cic_interp_sync           : std_logic_vector(10 downto 0);
+  signal tx_cic_interp_en_sync        : std_logic;
+  signal tx_cic_interp_stb            : std_logic;
+  signal tx_gain_sync                 : std_logic_vector(31 downto 0);
+  signal rx_enable_sync               : std_logic;
+  signal rx_enable_stb                : std_logic;
+  signal rx_enable_n                  : std_logic;
+  signal tx_enable_sync               : std_logic;
+  signal tx_enable_stb                : std_logic;
+  signal tx_enable_n                  : std_logic;
+  signal usrp_mode_ctrl_ack_int       : std_logic;
   signal rx_restart_cal_sync          : std_logic;
   signal tx_restart_cal_sync          : std_logic;
-  signal rx_decim_ack_int             : std_logic;
-  signal tx_interp_ack_int            : std_logic;
+  signal rx_cic_decim_ack_int         : std_logic;
+  signal tx_cic_interp_ack_int        : std_logic;
 
   -- 2x FIFO signals
   signal tx_2x_fifo_din               : std_logic_vector(31 downto 0);
@@ -447,16 +465,14 @@ architecture RTL of usrp_ddr_intf is
   signal rx_data_2x_b                 : std_logic_vector( 6 downto 0);
   signal rx_data_2x_ddr               : std_logic_vector( 6 downto 0);
 
-  signal rx_decim                     : std_logic_vector(12 downto 0);
   signal rx_cic_rate                  : std_logic_vector(10 downto 0);
   signal rx_cic_rate_we               : std_logic;
-  signal rx_decim_stb                 : std_logic;
 
   signal rx_data_i                    : std_logic_vector(13 downto 0);
   signal rx_data_q                    : std_logic_vector(13 downto 0);
   signal rx_cic_nd                    : std_logic;
-  signal rx_cic_din_i                 : std_logic_vector(31 downto 0);
-  signal rx_cic_din_q                 : std_logic_vector(31 downto 0);
+  signal rx_cic_din_i                 : std_logic_vector(13 downto 0);
+  signal rx_cic_din_q                 : std_logic_vector(13 downto 0);
   signal rx_cic_dout_i                : std_logic_vector(46 downto 0);
   signal rx_cic_dout_q                : std_logic_vector(46 downto 0);
   signal rx_cic_rdy_i                 : std_logic;
@@ -467,20 +483,13 @@ architecture RTL of usrp_ddr_intf is
   signal rx_gain_dout_q               : std_logic_vector(35 downto 0);
   signal rx_gain_dout_trunc_i         : std_logic_vector(31 downto 0);
   signal rx_gain_dout_trunc_q         : std_logic_vector(31 downto 0);
-  signal rx_halfband1_nd              : std_logic;
-  signal rx_halfband1_rfd_i           : std_logic;
-  signal rx_halfband1_dout_valid_i    : std_logic;
-  signal rx_halfband1_din_i           : std_logic_vector(31 downto 0);
-  signal rx_halfband1_dout_i          : std_logic_vector(31 downto 0);
-  signal rx_halfband1_din_q           : std_logic_vector(31 downto 0);
-  signal rx_halfband1_dout_q          : std_logic_vector(31 downto 0);
-  signal rx_halfband2_nd              : std_logic;
-  signal rx_halfband2_rfd_i           : std_logic;
-  signal rx_halfband2_dout_valid_i    : std_logic;
-  signal rx_halfband2_din_i           : std_logic_vector(31 downto 0);
-  signal rx_halfband2_dout_i          : std_logic_vector(31 downto 0);
-  signal rx_halfband2_din_q           : std_logic_vector(31 downto 0);
-  signal rx_halfband2_dout_q          : std_logic_vector(31 downto 0);
+  signal rx_halfband_nd               : std_logic;
+  signal rx_halfband_rfd_i            : std_logic;
+  signal rx_halfband_dout_valid_i     : std_logic;
+  signal rx_halfband_din_i            : std_logic_vector(31 downto 0);
+  signal rx_halfband_dout_i           : std_logic_vector(31 downto 0);
+  signal rx_halfband_din_q            : std_logic_vector(31 downto 0);
+  signal rx_halfband_dout_q           : std_logic_vector(31 downto 0);
   signal rx_fix2float_nd              : std_logic;
   signal rx_fix2float_rfd_i           : std_logic;
   signal rx_fix2float_rdy_i           : std_logic;
@@ -501,7 +510,6 @@ architecture RTL of usrp_ddr_intf is
   signal rx_fifo_dout                 : std_logic_vector(63 downto 0);
 
   -- TX signals
-  signal ping_pong                    : std_logic;
   signal tx_data_i                    : std_logic_vector(31 downto 0);
   signal tx_data_q                    : std_logic_vector(31 downto 0);
   signal tx_data_a                    : std_logic_vector(15 downto 0);
@@ -510,13 +518,11 @@ architecture RTL of usrp_ddr_intf is
   signal tx_data_2x_b                 : std_logic_vector( 7 downto 0);
   signal tx_data_2x_ddr               : std_logic_vector( 7 downto 0);
 
-  signal tx_interp                    : std_logic_vector(12 downto 0);
   signal tx_cic_rate                  : std_logic_vector(10 downto 0);
   signal tx_cic_rate_we               : std_logic;
-  signal tx_interp_stb                : std_logic;
 
   signal tx_cic_nd                    : std_logic;
-  signal tx_cic_nd_dly                : std_logic_vector(3 downto 0);
+  signal tx_cic_nd_int                : std_logic;
   signal tx_cic_din_i                 : std_logic_vector(19 downto 0);
   signal tx_cic_din_q                 : std_logic_vector(19 downto 0);
   signal tx_cic_dout_i                : std_logic_vector(41 downto 0);
@@ -527,40 +533,28 @@ architecture RTL of usrp_ddr_intf is
   signal tx_gain_din_q                : std_logic_vector(41 downto 0);
   signal tx_gain_dout_i               : std_logic_vector(19 downto 0);
   signal tx_gain_dout_q               : std_logic_vector(19 downto 0);
-  signal tx_halfband1_nd              : std_logic;
-  signal tx_halfband1_rfd_i           : std_logic;
-  signal tx_halfband1_dout_valid_i    : std_logic;
-  signal tx_halfband1_din_i           : std_logic_vector(31 downto 0);
-  signal tx_halfband1_dout_i          : std_logic_vector(31 downto 0);
-  signal tx_halfband1_din_q           : std_logic_vector(31 downto 0);
-  signal tx_halfband1_dout_q          : std_logic_vector(31 downto 0);
-  signal tx_halfband2_nd              : std_logic;
-  signal tx_halfband2_nd_dly          : std_logic_vector(1 downto 0);
-  signal tx_halfband2_rfd_i           : std_logic;
-  signal tx_halfband2_dout_valid_i    : std_logic;
-  signal tx_halfband2_din_i           : std_logic_vector(31 downto 0);
-  signal tx_halfband2_dout_i          : std_logic_vector(31 downto 0);
-  signal tx_halfband2_din_q           : std_logic_vector(31 downto 0);
-  signal tx_halfband2_dout_q          : std_logic_vector(31 downto 0);
-  signal tx_halfband2_dout_trunc_i    : std_logic_vector(19 downto 0);
-  signal tx_halfband2_dout_trunc_q    : std_logic_vector(19 downto 0);
+  signal tx_halfband_ce               : std_logic;
+  signal tx_halfband_nd               : std_logic;
+  signal tx_halfband_nd_int           : std_logic;
+  signal tx_halfband_rfd_i            : std_logic;
+  signal tx_halfband_dout_valid_i     : std_logic;
+  signal tx_halfband_din_i            : std_logic_vector(19 downto 0);
+  signal tx_halfband_dout_i           : std_logic_vector(19 downto 0);
+  signal tx_halfband_din_q            : std_logic_vector(19 downto 0);
+  signal tx_halfband_dout_q           : std_logic_vector(19 downto 0);
   signal tx_float2fix_nd              : std_logic;
   signal tx_float2fix_rfd_i           : std_logic;
   signal tx_float2fix_rdy_i           : std_logic;
-  signal tx_float2fix_dout_i          : std_logic_vector(31 downto 0);
-  signal tx_float2fix_dout_q          : std_logic_vector(31 downto 0);
-  signal tx_data_forward_i            : std_logic_vector(31 downto 0);
-  signal tx_data_forward_q            : std_logic_vector(31 downto 0);
+  signal tx_float2fix_dout_i          : std_logic_vector(19 downto 0);
+  signal tx_float2fix_dout_q          : std_logic_vector(19 downto 0);
   signal tx_trunc_din_i               : std_logic_vector(19 downto 0);
   signal tx_trunc_din_q               : std_logic_vector(19 downto 0);
   signal tx_trunc_dout_i              : std_logic_vector(15 downto 0);
   signal tx_trunc_dout_q              : std_logic_vector(15 downto 0);
-  signal tx_cic_cnt                   : integer range 0 to 2047;
-  signal tx_halfband1_cnt             : integer range 0 to 8191;
-  signal tx_halfband2_cnt             : integer range 0 to 4095;
 
   signal tx_fifo_wr_en_int            : std_logic;
   signal tx_fifo_rd_en                : std_logic;
+  signal tx_fifo_rd_en_int            : std_logic;
   signal tx_fifo_full_int             : std_logic;
   signal tx_fifo_empty                : std_logic;
   signal tx_fifo_almost_empty         : std_logic;
@@ -592,7 +586,6 @@ begin
   proc_calibrate_rx_mmcm : process(clk_rx,rx_reset)
   begin
     if (rx_reset = '1') then
-      usrp_mode_ctrl_reg_ack_int      <= '0';
       rx_mmcm_phase                   <= 0;
       rx_psincdec                     <= '0';
       rx_psen                         <= '0';
@@ -654,13 +647,6 @@ begin
             end if;
             if (rx_psdone = '1') then
               rx_phase_busy_int       <= '0';
-            end if;
-            -- Acknowledgement logic for UART control interface
-            if (usrp_mode_ctrl_reg_en_sync = '1' AND usrp_mode_ctrl_reg_ack_int = '0') then
-              usrp_mode_ctrl_reg_ack_int  <= '1';
-            end if;
-            if (usrp_mode_ctrl_reg_en_sync = '0') then
-              usrp_mode_ctrl_reg_ack_int  <= '0';
             end if;
 
           when others =>
@@ -745,7 +731,7 @@ begin
   -----------------------------------------------------------------------------
   -- Route BUFR DDR data clock to MMCM to generate a phase shifted
   -- global clock whose rising edge is ideally in the middle of
-  -- the DDR data "eye"
+  -- the DDR data bit
   inst_rx_mmcm_ddr_to_sdr : mmcm_ddr_to_sdr
     port map (
       CLKIN_100MHz                  => ddr_data_clk_bufg,
@@ -804,16 +790,14 @@ begin
         O                           => rx_data_2x_ddr(i));
   end generate;
 
-  -- RX Programmable Decimation
-  -- CIC Filter with programmabled decimation rate of 4 - 2047.
-  rx_cic_rate                         <= rx_decim(12 downto 2);
-  rx_cic_rate_we                      <= rx_decim_stb when rx_cic_rate(10 downto 1) /= (10 downto 1 =>'0') else '0';
+  rx_cic_rate                         <= rx_cic_decim_sync;
+  rx_cic_rate_we                      <= rx_cic_decim_stb OR rx_enable_stb;
 
   i_cic_decimator : cic_decimator
     port map (
       clk                             => clk_rx,
-      sclr                            => rx_fifo_reset_sync,
-      din                             => rx_data_i,
+      sclr                            => rx_enable_n,
+      din                             => rx_cic_din_i,
       rate                            => rx_cic_rate,
       rate_we                         => rx_cic_rate_we,
       dout                            => rx_cic_dout_i,
@@ -824,8 +808,8 @@ begin
   q_cic_decimator : cic_decimator
     port map (
       clk                             => clk_rx,
-      sclr                            => rx_fifo_reset_sync,
-      din                             => rx_data_q,
+      sclr                            => rx_enable_n,
+      din                             => rx_cic_din_q,
       rate                            => rx_cic_rate,
       rate_we                         => rx_cic_rate_we,
       dout                            => rx_cic_dout_q,
@@ -836,27 +820,27 @@ begin
   -- The halfband FIR filters use 32 bit wide inputs. To ensure we use the
   -- maximum dynamic range, we apply gain to CIC filter's output based on the
   -- decimation rate.
-  -- WARNING: Input a is 47 bits, input b is 25 bits, so the resulting output
-  --          p internally is 72 bits wide. However, output is actually the
-  --          slice p(47 down 16).
+  -- WARNING: Input a is 47 bits, input b is 32 bits, so the resulting output
+  --          p internally is 72 bits wide. However, the output is the
+  --          bit slice p(47 down 16).
   i_mult_rx_gain_adjust : mult_rx_gain_adjust
     port map (
       clk                             => clk_rx,
-      sclr                            => rx_fifo_reset_sync,
+      sclr                            => rx_enable_n,
       a                               => rx_gain_din_i,
-      b                               => rx_gain_reg_sync,
+      b                               => rx_gain_sync,
       p                               => rx_gain_dout_i);
 
   q_mult_rx_gain_adjust : mult_rx_gain_adjust
     port map (
       clk                             => clk_rx,
-      sclr                            => rx_fifo_reset_sync,
+      sclr                            => rx_enable_n,
       a                               => rx_gain_din_q,
-      b                               => rx_gain_reg_sync,
+      b                               => rx_gain_sync,
       p                               => rx_gain_dout_q);
 
   -- Truncation causes a -0.5 bias. This performs unbiased truncation of multiplier output to 32 bits.
-  -- We only use 4 bits as rounding more digits yields diminishing returns.
+  -- We only use 4 bits as rounding more bits yields diminishing returns.
   i_rx_gain_trunc_unbiased : trunc_unbiased
     generic map (
       WIDTH_IN                        => 36,
@@ -873,59 +857,35 @@ begin
       i                               => rx_gain_dout_q,
       o                               => rx_gain_dout_trunc_q);
 
-  -- FIR Halfband Decimation filter stage 1
+  -- FIR Halfband Decimation
   -- Input is fixed1_31, output is fixed2_30 due to the very small filter gain
-  i_fir_halfband_decimator_1 : fir_halfband_decimator
+  i_fir_halfband_decimator : fir_halfband_decimator
     port map (
       clk                             => clk_rx,
-      sclr                            => rx_fifo_reset_sync,
-      nd                              => rx_halfband1_nd,
-      rfd                             => rx_halfband1_rfd_i,
+      sclr                            => rx_enable_n,
+      nd                              => rx_halfband_nd,
+      rfd                             => rx_halfband_rfd_i,
       rdy                             => open,
-      data_valid                      => rx_halfband1_dout_valid_i,
-      din                             => rx_halfband1_din_i,
-      dout                            => rx_halfband1_dout_i);
+      data_valid                      => rx_halfband_dout_valid_i,
+      din                             => rx_halfband_din_i,
+      dout                            => rx_halfband_dout_i);
 
-  q_fir_halfband_decimator_1 : fir_halfband_decimator
+  q_fir_halfband_decimator : fir_halfband_decimator
     port map (
       clk                             => clk_rx,
-      sclr                            => rx_fifo_reset_sync,
-      nd                              => rx_halfband1_nd,
+      sclr                            => rx_enable_n,
+      nd                              => rx_halfband_nd,
       rfd                             => open,
       rdy                             => open,
       data_valid                      => open,
-      din                             => rx_halfband1_din_q,
-      dout                            => rx_halfband1_dout_q);
-
-  -- FIR Halfband Decimation filter stage 2
-  -- Input is fixed1_31, output is fixed2_30 due to the very small filter gain
-  i_fir_halfband_decimator_2 : fir_halfband_decimator
-    port map (
-      clk                             => clk_rx,
-      sclr                            => rx_fifo_reset_sync,
-      nd                              => rx_halfband2_nd,
-      rfd                             => rx_halfband2_rfd_i,
-      rdy                             => open,
-      data_valid                      => rx_halfband2_dout_valid_i,
-      din                             => rx_halfband2_din_i,
-      dout                            => rx_halfband2_dout_i);
-
-  q_fir_halfband_decimator_2 : fir_halfband_decimator
-    port map (
-      clk                             => clk_rx,
-      sclr                            => rx_fifo_reset_sync,
-      nd                              => rx_halfband2_nd,
-      rfd                             => open,
-      rdy                             => open,
-      data_valid                      => open,
-      din                             => rx_halfband2_din_q,
-      dout                            => rx_halfband2_dout_q);
+      din                             => rx_halfband_din_q,
+      dout                            => rx_halfband_dout_q);
 
   -- Convert 32 bit fixed point to 32 bit floating point
   i_fix1_31_to_float32 : fix1_31_to_float32
     port map (
       clk                             => clk_rx,
-      sclr                            => rx_fifo_reset_sync,
+      sclr                            => rx_enable_n,
       operation_nd                    => rx_fix2float_nd,
       operation_rfd                   => rx_fix2float_rfd_i,
       rdy                             => rx_fix2float_rdy_i,
@@ -935,104 +895,25 @@ begin
   q_fix1_31_to_float32 : fix1_31_to_float32
     port map (
       clk                             => clk_rx,
-      sclr                            => rx_fifo_reset_sync,
+      sclr                            => rx_enable_n,
       operation_nd                    => rx_fix2float_nd,
       operation_rfd                   => open,
       rdy                             => open,
       a                               => rx_fix2float_din_q,
       result                          => rx_fix2float_dout_q);
 
-  -- Forward RX data based on decimation setting
-  -- Bypass CIC filter when decimation is either 1,2,or 4
-  rx_gain_din_i                       <= rx_data_i & (32 downto 0 => '0') when rx_cic_rate(10 downto 1) = (10 downto 1 => '0') else
-                                         rx_cic_dout_i;
-  rx_gain_din_q                       <= rx_data_q & (32 downto 0 => '0') when rx_cic_rate(10 downto 1) = (10 downto 1 => '0') else
-                                         rx_cic_dout_q;
-  -- Decimate by 4, sample go through both halfband filters. No need for mux.
-  rx_halfband1_din_i                  <= rx_gain_dout_trunc_i;
-  rx_halfband1_din_q                  <= rx_gain_dout_trunc_q;
-  -- Decimate by 2, samples go through only the second halfband filter.
-  rx_halfband2_din_i                  <= rx_gain_dout_trunc_i when rx_decim = "0000000000010" else
-                                         rx_halfband1_dout_i;
-  rx_halfband2_din_q                  <= rx_gain_dout_trunc_q when rx_decim = "0000000000010" else
-                                         rx_halfband1_dout_q;
-  -- No decimation, samples skip all filters and go directly to the fixed to float conversion block.
-  rx_fix2float_din_i                  <= rx_gain_dout_trunc_i when rx_decim = "0000000000001" else
-                                         rx_halfband2_dout_i;
-  rx_fix2float_din_q                  <= rx_gain_dout_trunc_q when rx_decim = "0000000000001" else
-                                         rx_halfband2_dout_q;
-
-  -- Controls the flow of data through the decimators
-  proc_rx_flow_control : process(clk_rx, rx_fifo_reset_sync)
-  begin
-    if (rx_fifo_reset_sync = '1') then
-      rx_cic_nd                       <= '0';
-      rx_halfband1_nd                 <= '0';
-      rx_halfband2_nd                 <= '0';
-      rx_fix2float_nd                 <= '0';
-    else
-      if rising_edge(clk_rx) then
-        -- The lower 3 bits of rx_decim determine how the samples flow
-        -- through the CIC & FIR halfband filters.
-        case rx_decim is
-          -- Decimate by 4: No CIC filter, use both FIR halfband filters
-          when "0000000000100" =>
-            rx_cic_nd                 <= '0';
-            rx_halfband1_nd           <= rx_halfband1_rfd_i;
-            rx_halfband2_nd           <= rx_halfband1_dout_valid_i;
-            rx_fix2float_nd           <= rx_halfband2_dout_valid_i;
-
-          -- Decimate by 2: No CIC filter, use only second FIR halfband filter
-          when "0000000000010" =>
-            rx_cic_nd                 <= '0';
-            rx_halfband1_nd           <= '0';
-            rx_halfband2_nd           <= rx_halfband2_rfd_i;
-            rx_fix2float_nd           <= rx_halfband2_dout_valid_i;
-
-          -- No decimation
-          -- "001": Use fixed to float conversion
-          when "0000000000001" =>
-            rx_cic_nd                 <= '0';
-            rx_halfband1_nd           <= '0';
-            rx_halfband2_nd           <= '0';
-            rx_fix2float_nd           <= rx_fix2float_rfd_i;
-
-          -- Decimate by n*8 where n = 1-1023
-          when others =>
-            rx_cic_nd                 <= rx_cic_rfd_i;
-            rx_halfband1_nd           <= rx_cic_rdy_i;
-            rx_halfband2_nd           <= rx_halfband1_dout_valid_i;
-            rx_fix2float_nd           <= rx_halfband2_dout_valid_i;
-        end case;
-      end if;
-    end if;
-  end process;
-
-  -- Latch RX decimation rate register
-  proc_rx_decimation : process(clk_rx, rx_reset)
-  begin
-    if (rx_reset = '1') then
-      rx_decim                        <= "0000000000001"; -- No decimation
-      rx_decim_stb                    <= '0';
-      rx_decim_ack_int                <= '0';
-    else
-      if rising_edge(clk_rx) then
-        -- The CIC filter is reset with rx_fifo_reset_sync, which also
-        -- reset the rate to the default value. This ensures after
-        -- the reset signal is deasserted, the rate is properly updated.
-        rx_decim_stb                  <= rx_fifo_reset_sync;
-        -- Register updates
-        if (rx_decim_en_sync = '1' AND rx_decim_ack_int = '0') then
-          rx_decim                    <= rx_decim_reg_sync;
-          rx_decim_stb                <= '1';
-          rx_decim_ack_int            <= '1';
-        end if;
-        if (rx_decim_en_sync = '0') then
-          rx_decim_ack_int            <= '0';
-        end if;
-      end if;
-    end if;
-  end process;
+  -- Implement flow control signals and bypass logic
+  rx_cic_din_i                        <= rx_data_i;
+  rx_cic_din_q                        <= rx_data_q;
+  rx_cic_nd                           <= '1'                              when rx_cic_bypass_sync = '1' else rx_cic_rfd_i;
+  rx_gain_din_i                       <= rx_data_i & (32 downto 0 => '0') when rx_cic_bypass_sync = '1' else rx_cic_dout_i;
+  rx_gain_din_q                       <= rx_data_q & (32 downto 0 => '0') when rx_cic_bypass_sync = '1' else rx_cic_dout_q;
+  rx_halfband_din_i                   <= rx_gain_dout_trunc_i;
+  rx_halfband_din_q                   <= rx_gain_dout_trunc_q;
+  rx_halfband_nd                      <= rx_cic_nd                        when rx_cic_bypass_sync = '1' else rx_cic_rdy_i;
+  rx_fix2float_din_i                  <= rx_halfband_din_i                when rx_hb_bypass_sync = '1' else rx_halfband_dout_i;
+  rx_fix2float_din_q                  <= rx_halfband_din_q                when rx_hb_bypass_sync = '1' else rx_halfband_dout_q;
+  rx_fix2float_nd                     <= rx_halfband_nd                   when rx_hb_bypass_sync = '1' else rx_halfband_dout_valid_i;
 
   -- FIFO for clock crossing and buffering (Receive)
   -- Bypass fixed to float conversion and output raw data when decimation is set to 0
@@ -1042,12 +923,12 @@ begin
   rx_fifo_wr_en_int                   <= rx_fix2float_nd when rx_fix2float_bypass_sync = '1' else
                                          rx_fix2float_rdy_i;
   rx_fifo_rd_en_int                   <= rx_fifo_rd_en AND NOT(rx_fifo_empty_int);
-  rx_fifo_data_i                      <= rx_fifo_dout(31 downto 0);
-  rx_fifo_data_q                      <= rx_fifo_dout(63 downto 32);
+  rx_fifo_data_i                      <= rx_fifo_dout(63 downto 32);
+  rx_fifo_data_q                      <= rx_fifo_dout(31 downto 0);
 
   inst_rx_data_fifo_64x4096 : fifo_64x4096
     port map (
-      wr_rst                          => rx_fifo_reset_sync,
+      wr_rst                          => rx_reset,
       wr_clk                          => clk_rx,
       rd_rst                          => rx_fifo_reset,
       rd_clk                          => clk_rx_fifo,
@@ -1063,13 +944,13 @@ begin
       underflow                       => rx_fifo_underflow);
 
   -- Latch overflow to indicate that the FIFO needs to be reset
-  proc_rx_overflow_latch : process(clk_rx,rx_fifo_reset_sync)
+  proc_rx_overflow_latch : process(clk_rx,rx_enable_sync)
   begin
-    if (rx_fifo_reset_sync = '1') then
+    if (rx_enable_sync = '0') then
       rx_fifo_overflow_latch_int      <= '0';
     else
       if rising_edge(clk_rx) then
-        if (rx_fifo_overflow = '1') then
+        if (rx_fifo_wr_en = '1' AND rx_fifo_full = '1') then
           rx_fifo_overflow_latch_int  <= '1';
         end if;
       end if;
@@ -1157,116 +1038,61 @@ begin
   end generate;
 
   -- TX Interpolation Chain
-
-  -- Convert 32 bit floating point to 32 bit fixed point (fix1_31)
-  i_float32_to_fix1_31 : float32_to_fix1_31
+  -- Convert 32 bit floating point to 20 bit fixed point (fix1_19)
+  i_float32_to_fix1_19 : float32_to_fix1_19
     port map (
       clk                             => clk_tx,
-      sclr                            => tx_fifo_reset_sync,
+      sclr                            => tx_enable_n,
       operation_nd                    => tx_float2fix_nd,
       operation_rfd                   => tx_float2fix_rfd_i,
       rdy                             => tx_float2fix_rdy_i,
       a                               => tx_data_i,
       result                          => tx_float2fix_dout_i);
 
-  q_float32_to_fix1_31 : float32_to_fix1_31
+  q_float32_to_fix1_19 : float32_to_fix1_19
     port map (
       clk                             => clk_tx,
-      sclr                            => tx_fifo_reset_sync,
+      sclr                            => tx_enable_n,
       operation_nd                    => tx_float2fix_nd,
       operation_rfd                   => open,
       rdy                             => open,
       a                               => tx_data_q,
       result                          => tx_float2fix_dout_q);
 
-  proc_tx_forward_reg : process(clk_tx)
-  begin
-    if rising_edge(clk_tx) then
-      if (tx_float2fix_bypass_sync = '1') then
-        tx_data_forward_i             <= tx_data_i(15 downto 0) & (15 downto 0 => '0');
-        tx_data_forward_q             <= tx_data_q(15 downto 0) & (15 downto 0 => '0');
-      else
-        tx_data_forward_i             <= tx_float2fix_dout_i;
-        tx_data_forward_q             <= tx_float2fix_dout_q;
-      end if;
-    end if;
-  end process;
-
-  -- TX Interpolation Chain
-
-  -- FIR Halfband Interpolation filter stage 1
+  -- FIR Halfband Interpolator
   -- Input is fixed1_31, output is fixed2_30 due to the very small filter gain
-  i_fir_halfband_interpolator_1 : fir_halfband_interpolator
+  i_fir_halfband_interpolator : fir_halfband_interpolator
     port map (
       clk                             => clk_tx,
-      sclr                            => tx_fifo_reset_sync,
-      nd                              => tx_halfband1_nd,
-      rfd                             => tx_halfband1_rfd_i,
+      sclr                            => tx_enable_n,
+      nd                              => tx_halfband_nd,
+      ce                              => tx_halfband_ce,
+      rfd                             => tx_halfband_rfd_i,
       rdy                             => open,
-      data_valid                      => tx_halfband1_dout_valid_i,
-      din                             => tx_halfband1_din_i,
-      dout                            => tx_halfband1_dout_i);
+      data_valid                      => tx_halfband_dout_valid_i,
+      din                             => tx_halfband_din_i,
+      dout                            => tx_halfband_dout_i);
 
-  q_fir_halfband_interpolator_1 : fir_halfband_interpolator
+  q_fir_halfband_interpolator : fir_halfband_interpolator
     port map (
       clk                             => clk_tx,
-      sclr                            => tx_fifo_reset_sync,
-      nd                              => tx_halfband1_nd,
+      sclr                            => tx_enable_n,
+      nd                              => tx_halfband_nd,
+      ce                              => tx_halfband_ce,
       rfd                             => open,
       rdy                             => open,
       data_valid                      => open,
-      din                             => tx_halfband1_din_q,
-      dout                            => tx_halfband1_dout_q);
-
-  -- FIR Halfband Interpolation filter stage 2
-  -- Input is expected to be fixed2_30
-  -- Output is fixed3_29 due to the very small filter gain
-  i_fir_halfband_interpolator_2 : fir_halfband_interpolator
-    port map (
-      clk                             => clk_tx,
-      sclr                            => tx_fifo_reset_sync,
-      nd                              => tx_halfband2_nd,
-      rfd                             => tx_halfband2_rfd_i,
-      rdy                             => open,
-      data_valid                      => tx_halfband2_dout_valid_i,
-      din                             => tx_halfband2_din_i,
-      dout                            => tx_halfband2_dout_i);
-
-  q_fir_halfband_interpolator_2 : fir_halfband_interpolator
-    port map (
-      clk                             => clk_tx,
-      sclr                            => tx_fifo_reset_sync,
-      nd                              => tx_halfband2_nd,
-      rfd                             => open,
-      rdy                             => open,
-      data_valid                      => open,
-      din                             => tx_halfband2_din_q,
-      dout                            => tx_halfband2_dout_q);
-
-  i_tx_halfband2_dout_trunc_unbiased : trunc_unbiased
-    generic map (
-      WIDTH_IN                        => 24,
-      TRUNCATE                        => 4)
-    port map (
-      i                               => tx_halfband2_dout_i(31 downto 8),
-      o                               => tx_halfband2_dout_trunc_i);
-
-  q_tx_halfband2_dout_trunc_unbiased : trunc_unbiased
-    generic map (
-      WIDTH_IN                        => 24,
-      TRUNCATE                        => 4)
-    port map (
-      i                               => tx_halfband2_dout_q(31 downto 8),
-      o                               => tx_halfband2_dout_trunc_q);
+      din                             => tx_halfband_din_q,
+      dout                            => tx_halfband_dout_q);
 
   -- CIC Filter with programmabled decimation rate of 4 - 2047.
-  tx_cic_rate                         <= tx_interp(12 downto 2);
-  tx_cic_rate_we                      <= tx_interp_stb when tx_cic_rate /= (10 downto 0 =>'0') else '0';
+  tx_cic_rate                         <= tx_cic_interp;
+  tx_cic_rate_we                      <= tx_cic_interp_stb OR tx_enable_stb;
 
   i_cic_interpolator : cic_interpolator
     port map (
       clk                             => clk_tx,
-      sclr                            => tx_fifo_reset_sync,
+      sclr                            => tx_enable_n,
       din                             => tx_cic_din_i,
       rate                            => tx_cic_rate,
       rate_we                         => tx_cic_rate_we,
@@ -1278,7 +1104,7 @@ begin
   q_cic_interpolator : cic_interpolator
     port map (
       clk                             => clk_tx,
-      sclr                            => tx_fifo_reset_sync,
+      sclr                            => tx_enable_n,
       din                             => tx_cic_din_q,
       rate                            => tx_cic_rate,
       rate_we                         => tx_cic_rate_we,
@@ -1287,26 +1113,25 @@ begin
       rdy                             => open,
       rfd                             => open);
 
-  -- The halfband FIR filters use 32 bit wide inputs. To ensure we use the
-  -- maximum dynamic range, we apply gain to CIC filter's output based on the
-  -- decimation rate.
-  -- WARNING: Input a is 44 bits, input b is 18 bits, so the resulting output
-  --          p internally is 62 bits wide. However, output is actually the
-  --          slice p(44 downto 13) with rounding.
+  -- To ensure we use the maximum dynamic range, we apply gain to CIC filter's
+  -- output based on the interpolation rate.
+  -- WARNING: Input a is 42 bits, input b is 32 bits, so the resulting output
+  --          p internally is 74 bits wide. However, the output is the
+  --          bit slice p(41 downto 22).
   i_mult_tx_gain_adjust : mult_tx_gain_adjust
     port map (
       clk                             => clk_tx,
-      sclr                            => tx_fifo_reset_sync,
+      sclr                            => tx_enable_n,
       a                               => tx_gain_din_i,
-      b                               => tx_gain_reg_sync,
+      b                               => tx_gain_sync,
       p                               => tx_gain_dout_i);
 
   q_mult_tx_gain_adjust : mult_tx_gain_adjust
     port map (
       clk                             => clk_tx,
-      sclr                            => tx_fifo_reset_sync,
+      sclr                            => tx_enable_n,
       a                               => tx_gain_din_q,
-      b                               => tx_gain_reg_sync,
+      b                               => tx_gain_sync,
       p                               => tx_gain_dout_q);
 
   i_tx_trunc_unbiased : trunc_unbiased
@@ -1325,127 +1150,37 @@ begin
       i                               => tx_trunc_din_q,
       o                               => tx_trunc_dout_q);
 
-  -- Forward TX data based on interpolation settings
-  tx_halfband1_din_i                  <= tx_data_forward_i;
-  tx_halfband1_din_q                  <= tx_data_forward_q;
-  tx_halfband2_din_i                  <= tx_halfband1_dout_i;
-  tx_halfband2_din_q                  <= tx_halfband1_dout_q;
-  tx_cic_din_i                        <= tx_halfband2_dout_trunc_i;
-  tx_cic_din_q                        <= tx_halfband2_dout_trunc_q;
-  tx_gain_din_i                       <= tx_data_forward_i & (9 downto 0 => '0')    when tx_interp(12 downto 0) = "0000000000001" else
-                                         tx_halfband1_dout_i & (9 downto 0 => '0')  when tx_interp(12 downto 0) = "0000000000010" else
-                                         tx_halfband2_dout_i & (9 downto 0 => '0')  when tx_interp(12 downto 0) = "0000000000100" else
-                                         tx_cic_dout_i;
-  tx_gain_din_q                       <= tx_data_forward_q & (9 downto 0 => '0')    when tx_interp(12 downto 0) = "0000000000001" else
-                                         tx_halfband1_dout_q & (9 downto 0 => '0')  when tx_interp(12 downto 0) = "0000000000010" else
-                                         tx_halfband2_dout_q & (9 downto 0 => '0')  when tx_interp(12 downto 0) = "0000000000100" else
-                                         tx_cic_dout_q;
+  -- TX data flow control and bypassing
+  tx_float2fix_nd                     <= '1'                    when tx_hb_bypass_sync = '1' AND tx_cic_bypass_sync = '1' else
+                                         tx_cic_rfd_i           when tx_hb_bypass_sync = '1' AND tx_cic_bypass_sync = '0' else
+                                         tx_halfband_rfd_i;
+  tx_halfband_din_i                   <= tx_data_i(19 downto 0) when tx_float2fix_bypass_sync = '1' else tx_float2fix_dout_i;
+  tx_halfband_din_q                   <= tx_data_q(19 downto 0) when tx_float2fix_bypass_sync = '1' else tx_float2fix_dout_q;
+  tx_halfband_ce                      <= '1'                    when tx_cic_bypass_sync = '1' else tx_cic_rfd_i;
+  tx_halfband_nd                      <= tx_halfband_rfd_i AND tx_halfband_nd_int;
+  tx_halfband_nd_int                  <= tx_float2fix_nd        when tx_float2fix_bypass_sync = '1' else tx_float2fix_rdy_i;
+  tx_cic_din_i                        <= tx_halfband_din_i      when tx_hb_bypass_sync = '1' else tx_halfband_dout_i;
+  tx_cic_din_q                        <= tx_halfband_din_q      when tx_hb_bypass_sync = '1' else tx_halfband_dout_q;
+  tx_cic_nd                           <= tx_cic_rfd_i AND tx_cic_nd_int;
+  tx_cic_nd_int                       <= tx_halfband_nd_int     when tx_hb_bypass_sync = '1' else tx_halfband_dout_valid_i;
+  tx_gain_din_i                       <= tx_cic_din_i & (21 downto 0 => '0') when tx_cic_bypass_sync = '1' else tx_cic_dout_i;
+  tx_gain_din_q                       <= tx_cic_din_q & (21 downto 0 => '0') when tx_cic_bypass_sync = '1' else tx_cic_dout_q;
   tx_trunc_din_i                      <= tx_gain_dout_i;
   tx_trunc_din_q                      <= tx_gain_dout_q;
 
-  -- Controls the flow of data through the interpolators
-  proc_tx_flow_control : process(clk_tx, tx_fifo_reset_sync)
-  begin
-    if (tx_fifo_reset_sync = '1') then
-      tx_float2fix_nd                 <= '0';
-      tx_halfband1_nd                 <= '0';
-      tx_halfband2_nd                 <= '0';
-      tx_halfband2_nd_dly             <= (others=>'0');
-      tx_cic_nd                       <= '0';
-      tx_cic_nd_dly                   <= (others=>'0');
-      tx_cic_cnt                      <= 1;
-      tx_halfband1_cnt                <= 1;
-      tx_halfband2_cnt                <= 1;
-    else
-      if rising_edge(clk_tx) then
-        -- Counters to set the new data (i.e. data valid) signals
-        -- for each filter
-        tx_float2fix_nd               <= tx_halfband1_nd;
-        if (tx_halfband1_cnt = tx_interp) then
-          tx_halfband1_nd             <= '1';
-          tx_halfband1_cnt            <= 1;
-        else
-          tx_halfband1_nd             <= '0';
-          if (tx_halfband1_cnt = 8191) then
-            tx_halfband1_cnt          <= 0;
-          else
-            tx_halfband1_cnt          <= tx_halfband1_cnt + 1;
-          end if;
-        end if;
-        -- Need to delay the data valid signal so it lines up
-        -- with the ready for data signal
-        tx_halfband2_nd_dly(1)        <= tx_halfband2_nd_dly(0);
-        tx_halfband2_nd               <= tx_halfband2_nd_dly(1);
-        if (tx_halfband2_cnt = tx_interp(12 downto 1)) then
-          tx_halfband2_nd_dly(0)      <= '1';
-          tx_halfband2_cnt            <= 1;
-        else
-          tx_halfband2_nd_dly(0)      <= '0';
-          if (tx_halfband2_cnt = 4095) then
-            tx_halfband2_cnt          <= 1;
-          else
-            tx_halfband2_cnt          <= tx_halfband2_cnt + 1;
-          end if;
-        end if;
-        -- Need to delay the data valid signal even longer
-        -- with the ready for data signal
-        tx_cic_nd_dly(1)              <= tx_cic_nd_dly(0);
-        tx_cic_nd_dly(2)              <= tx_cic_nd_dly(1);
-        tx_cic_nd_dly(3)              <= tx_cic_nd_dly(2);
-        tx_cic_nd                     <= tx_cic_nd_dly(3);
-        if (tx_cic_cnt = tx_cic_rate) then
-          tx_cic_nd_dly(0)            <= '1';
-          tx_cic_cnt                  <= 1;
-        else
-          tx_cic_nd_dly(0)            <= '0';
-          if (tx_cic_cnt = 2047) then
-            tx_cic_cnt                <= 1;
-          else
-            tx_cic_cnt                <= tx_cic_cnt + 1;
-          end if;
-        end if;
-      end if;
-    end if;
-  end process;
-
-  -- Latch TX interpolation register
-  proc_tx_interpolation : process(clk_tx, tx_reset)
-  begin
-    if (tx_reset = '1') then
-      tx_interp                       <= "0000000000001"; -- No decimation
-      tx_interp_stb                   <= '0';
-      tx_interp_ack_int               <= '0';
-    else
-      if rising_edge(clk_tx) then
-        -- The CIC filter is reset with tx_fifo_reset_sync, which also
-        -- reset the rate to the default value. This ensures after
-        -- the reset signal is deasserted, the rate is properly updated.
-        tx_interp_stb                 <= tx_fifo_reset_sync;
-        -- Register updates
-        if (tx_interp_en_sync = '1' AND tx_interp_ack_int = '0') then
-          tx_interp                   <= tx_interp_reg_sync(12 downto 0);
-          tx_interp_stb               <= '1';
-          tx_interp_ack_int           <= '1';
-        end if;
-        if (tx_interp_en_sync = '0') then
-          tx_interp_ack_int           <= '0';
-        end if;
-      end if;
-    end if;
-  end process;
-
   -- FIFOs for clock crossing and buffering (Transmit)
-  tx_fifo_rd_en                     <= tx_halfband1_nd AND NOT(tx_fifo_empty);
+  tx_fifo_rd_en                     <= tx_fifo_rd_en_int AND NOT(tx_fifo_empty);
+  tx_fifo_rd_en_int                 <= tx_float2fix_nd AND tx_enable_sync;
   tx_fifo_wr_en_int                 <= tx_fifo_wr_en AND NOT(tx_fifo_full_int);
   tx_fifo_din                       <= tx_fifo_data_i & tx_fifo_data_q;
-  tx_data_i(31 downto 0)            <= tx_fifo_dout(63 downto 32);
-  tx_data_q(31 downto 0)            <= tx_fifo_dout(31 downto 0);
+  tx_data_i                         <= tx_fifo_dout(63 downto 32);
+  tx_data_q                         <= tx_fifo_dout(31 downto 0);
 
   inst_tx_data_fifo_64x4096 : fifo_64x4096
     port map (
       wr_rst                        => tx_fifo_reset,
       wr_clk                        => clk_tx_fifo,
-      rd_rst                        => tx_fifo_reset_sync,
+      rd_rst                        => tx_reset,
       rd_clk                        => clk_tx,
       din                           => tx_fifo_din,
       wr_en                         => tx_fifo_wr_en_int,
@@ -1459,13 +1194,13 @@ begin
       underflow                     => tx_fifo_underflow);
 
   -- Latch underflow to indicate that the FIFO needs to be reset
-  proc_tx_underflow_latch : process(clk_tx,tx_fifo_reset_sync)
+  proc_tx_underflow_latch : process(clk_tx,tx_enable_sync)
   begin
-    if (tx_fifo_reset_sync = '1') then
+    if (tx_enable_sync = '0') then
       tx_fifo_underflow_latch_int         <= '0';
     else
       if rising_edge(clk_tx) then
-        if (tx_fifo_underflow = '1') then
+        if (tx_fifo_rd_en_int = '1' AND tx_fifo_empty = '1') then
           tx_fifo_underflow_latch_int     <= '1';
         end if;
       end if;
@@ -1486,8 +1221,8 @@ begin
       clk                           => clk_rx,
       reset                         => rx_reset,
       tx_busy                       => tx_busy,
-      tx_data_stb                   => usrp_mode_ctrl_reg_en_sync,
-      tx_data                       => usrp_mode_ctrl_reg_sync,
+      tx_data_stb                   => usrp_mode_ctrl_stb,
+      tx_data                       => usrp_mode_ctrl_sync,
       rx_busy                       => open,
       rx_data_stb                   => open,
       rx_data                       => open,
@@ -1498,18 +1233,55 @@ begin
   uart_busy                         <= tx_busy;
 
   -----------------------------------------------------------------------------
+  -- Acknowledgement Logic
+  -----------------------------------------------------------------------------
+  proc_acknowledgements : process(clk_rx,rx_reset)
+  begin
+    if (rx_reset = '1') then
+      usrp_mode_ctrl_ack_int          <= '0';
+      rx_cic_decim_ack_int            <= '0';
+      tx_cic_interp_ack_int           <= '0';
+    else
+      if rising_edge(clk_rx) then
+        -- Acknowledgement for UART control interface
+        if (usrp_mode_ctrl_en_sync = '1' AND usrp_mode_ctrl_ack_int = '0') then
+          usrp_mode_ctrl_ack_int      <= '1';
+        end if;
+        if (usrp_mode_ctrl_en_sync = '0') then
+          usrp_mode_ctrl_ack_int  <= '0';
+        end if;
+        -- Acknowledgement for RX CIC
+        if (rx_cic_decim_en_sync = '1' AND rx_cic_decim_ack_int = '0') then
+          rx_cic_decim_ack_int        <= '1';
+        end if;
+        if (rx_cic_decim_en_sync = '0') then
+          rx_cic_decim_ack_int        <= '0';
+        end if;
+        -- Acknowledgement for TX CIC
+        if (tx_cic_interp_en_sync = '1' AND tx_cic_interp_ack_int = '0') then
+          tx_cic_interp_ack_int       <= '1';
+        end if;
+        if (tx_cic_interp_en_sync = '0') then
+          tx_cic_interp_ack_int       <= '0';
+        end if;
+      end if;
+    end if;
+  end process;
+
+  -----------------------------------------------------------------------------
   -- Synchronizers
   -----------------------------------------------------------------------------
   -- RX Synchronizers
   inst_rx_synchronizer : synchronizer_slv
     generic map (
       STROBE_EDGE                     => "N", -- None, Output is input
-      -- Note: You can either set all the output bits to the same value or
-      --       you can individualize each bit. Of course, that means
-      --       RESET_OUTPUT'length = rx_async'length.
-      --       In this case we want to ensure rx_fifo_reset_sync is high
-      --       during reset.
-      RESET_OUTPUT                    => "1" & (rx_async'length-2 downto 0 =>'0'))
+      -- Note: RESET_OUTPUT sets the reset state of the sync output. There is
+      --       some special handling in this module with regards to the value.
+      --       It can be a single value, such as "0", which will set all the
+      --       reset values to "0". Or you can enter the individual reset values
+      --       of each bit in the sync output signal.
+      --       See the source code for more details.
+      RESET_OUTPUT                    => "0")
     port map (
       clk                             => clk_rx,
       reset                           => rx_reset,
@@ -1519,7 +1291,6 @@ begin
   inst_rx_synchronizer_rising_edge_detect : synchronizer_slv
     generic map (
       STROBE_EDGE                     => "R", -- Risinge edge, strobe output on the rising edge
-      -- In this case we set all the bits to reset to the same value
       RESET_OUTPUT                    => "0")
     port map (
       clk                             => clk_rx,
@@ -1527,36 +1298,47 @@ begin
       async                           => rx_async_rising,
       sync                            => rx_sync_rising);
 
-  rx_async_rising(0)                  <= usrp_mode_ctrl_reg_en;
+  rx_async_rising(0)                  <= usrp_mode_ctrl_en;
   rx_async_rising(1)                  <= rx_phase_en;
-  rx_async_rising(2)                  <= rx_decim_en;
+  rx_async_rising(2)                  <= rx_cic_decim_en;
   rx_async_rising(3)                  <= rx_restart_cal;
-  usrp_mode_ctrl_reg_en_sync          <= rx_sync_rising(0);
+  rx_async_rising(4)                  <= rx_enable;
+  usrp_mode_ctrl_stb                  <= rx_sync_rising(0);
   rx_phase_en_sync                    <= rx_sync_rising(1);
-  rx_decim_en_sync                    <= rx_sync_rising(2);
+  rx_cic_decim_stb                    <= rx_sync_rising(2);
   rx_restart_cal_sync                 <= rx_sync_rising(3);
+  rx_enable_stb                       <= rx_sync_rising(4);
 
-  rx_async(7 downto 0)                <= usrp_mode_ctrl_reg;
+  rx_async(7 downto 0)                <= usrp_mode_ctrl;
   rx_async(8)                         <= rx_phase_incdec;
-  rx_async(21 downto 9)               <= rx_decim_reg;
-  rx_async(22)                        <= rx_fix2float_bypass;
-  rx_async(54 downto 23)              <= rx_gain_reg;
+  rx_async(19 downto 9)               <= rx_cic_decim;
+  rx_async(20)                        <= rx_fix2float_bypass;
+  rx_async(21)                        <= rx_cic_bypass;
+  rx_async(22)                        <= rx_hb_bypass;
+  rx_async(54 downto 23)              <= rx_gain;
   rx_async(64 downto 55)              <= rx_phase_init;
-  rx_async(65)                        <= rx_fifo_reset;
-  usrp_mode_ctrl_reg_sync             <= rx_sync(7 downto 0);
+  rx_async(65)                        <= rx_enable;
+  rx_async(66)                        <= rx_cic_decim_en;
+  rx_async(67)                        <= usrp_mode_ctrl_en;
+  usrp_mode_ctrl_sync                 <= rx_sync(7 downto 0);
   rx_phase_incdec_sync                <= rx_sync(8);
-  rx_decim_reg_sync                   <= rx_sync(21 downto 9);
-  rx_fix2float_bypass_sync            <= rx_sync(22);
-  rx_gain_reg_sync                    <= rx_sync(54 downto 23);
+  rx_cic_decim_sync                   <= rx_sync(19 downto 9);
+  rx_fix2float_bypass_sync            <= rx_sync(20);
+  rx_cic_bypass_sync                  <= rx_sync(21);
+  rx_hb_bypass_sync                   <= rx_sync(22);
+  rx_gain_sync                        <= rx_sync(54 downto 23);
   rx_phase_init_sync                  <= rx_sync(64 downto 55);
-  rx_fifo_reset_sync                  <= rx_sync(65);
+  rx_enable_sync                      <= rx_sync(65);
+  rx_cic_decim_en_sync                <= rx_sync(66);
+  usrp_mode_ctrl_en_sync              <= rx_sync(67);
+
+  rx_enable_n                         <= NOT(rx_enable_sync);
 
   -- TX Synchronizers
   inst_tx_synchronizer : synchronizer_slv
     generic map (
       STROBE_EDGE                     => "N",
-      -- Make sure tx_fifo_reset_sync is high during reset
-      RESET_OUTPUT                    => "1" & (tx_async'length-2 downto 0 =>'0'))
+      RESET_OUTPUT                    => "0")
     port map (
       clk                             => clk_tx,
       reset                           => tx_reset,
@@ -1565,7 +1347,8 @@ begin
 
   inst_tx_synchronizer_rising_edge_detect : synchronizer_slv
     generic map (
-      STROBE_EDGE                     => "R")
+      STROBE_EDGE                     => "R",
+      RESET_OUTPUT                    => "0")
     port map (
       clk                             => clk_tx,
       reset                           => tx_reset,
@@ -1573,24 +1356,34 @@ begin
       sync                            => tx_sync_rising);
 
   tx_async_rising(0)                  <= tx_phase_en;
-  tx_async_rising(1)                  <= tx_interp_en;
+  tx_async_rising(1)                  <= tx_cic_interp_en;
   tx_async_rising(2)                  <= tx_restart_cal;
+  tx_async_rising(3)                  <= tx_enable;
   tx_phase_en_sync                    <= tx_sync_rising(0);
-  tx_interp_en_sync                   <= tx_sync_rising(1);
+  tx_cic_interp_stb                   <= tx_sync_rising(1);
   tx_restart_cal_sync                 <= tx_sync_rising(2);
+  tx_enable_stb                       <= tx_sync_rising(3);
 
   tx_async(0)                         <= tx_phase_incdec;
-  tx_async(13 downto 1)               <= tx_interp_reg;
-  tx_async(45 downto 14)              <= tx_gain_reg;
-  tx_async(46)                        <= tx_float2fix_bypass;
+  tx_async(11 downto 1)               <= tx_cic_interp;
+  tx_async(12)                        <= tx_float2fix_bypass;
+  tx_async(13)                        <= tx_cic_bypass;
+  tx_async(14)                        <= tx_hb_bypass;
+  tx_async(46 downto 15)              <= tx_gain;
   tx_async(56 downto 47)              <= tx_phase_init;
-  tx_async(57)                        <= tx_fifo_reset;
+  tx_async(57)                        <= tx_enable;
+  tx_async(58)                        <= tx_cic_interp_en;
   tx_phase_incdec_sync                <= tx_sync(0);
-  tx_interp_reg_sync                  <= tx_sync(13 downto 1);
-  tx_gain_reg_sync                    <= tx_sync(45 downto 14);
-  tx_float2fix_bypass_sync            <= tx_sync(46);
+  tx_cic_interp_sync                  <= tx_sync(11 downto 1);
+  tx_float2fix_bypass_sync            <= tx_sync(12);
+  tx_cic_bypass_sync                  <= tx_sync(13);
+  tx_hb_bypass_sync                   <= tx_sync(14);
+  tx_gain_sync                        <= tx_sync(46 downto 15);
   tx_phase_init_sync                  <= tx_sync(56 downto 47);
-  tx_fifo_reset_sync                  <= tx_sync(57);
+  tx_enable_sync                      <= tx_sync(57);
+  tx_cic_interp_en_sync               <= tx_sync(58);
+
+  tx_enable_n                         <= NOT(tx_enable_sync);
 
   -- Sychronizer for rx overflow latch
   inst_rx_overflow_latch_synchronizer : synchronizer
@@ -1611,9 +1404,9 @@ begin
   -----------------------------------------------------------------------------
   -- Internal signals to output ports
   -----------------------------------------------------------------------------
-  usrp_mode_ctrl_reg_ack            <= usrp_mode_ctrl_reg_ack_int;
-  rx_decim_ack                      <= rx_decim_ack_int;
-  tx_interp_ack                     <= tx_interp_ack_int;
+  usrp_mode_ctrl_ack                <= usrp_mode_ctrl_ack_int;
+  rx_cic_decim_ack                  <= rx_cic_decim_ack_int;
+  tx_cic_interp_ack                 <= tx_cic_interp_ack_int;
   rx_phase_busy                     <= rx_phase_busy_int;
   tx_phase_busy                     <= tx_phase_busy_int;
   clk_rx_locked                     <= clk_rx_locked_int;

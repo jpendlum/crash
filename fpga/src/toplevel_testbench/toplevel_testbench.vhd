@@ -1037,7 +1037,7 @@ begin
   -----------------------------------------------------------------------------
   -- CRASH DDR Interface (on USRP)
   -----------------------------------------------------------------------------
-  inst_crash_ddr_intf : crush_ddr_intf
+  inst_crash_ddr_intf : crash_ddr_intf
     generic map (
       CLOCK_FREQ                  => 100e6,
       BAUD                        => 10e6)
@@ -1108,13 +1108,13 @@ begin
     dac_q_in              <= (others=>'0');
     wait until reset = '1';
     loop
-      PHASE_ACCUM         := PHASE_ACCUM + 2.0*MATH_PI*1.0/100.0;
+      PHASE_ACCUM         := PHASE_ACCUM + 2.0*MATH_PI*0.5/100.0;
       if (PHASE_ACCUM > 2.0*MATH_PI) then
         PHASE_ACCUM       := PHASE_ACCUM - 2.0*MATH_PI;
       end if;
       dac_channel_a_in    <= std_logic_vector(to_signed(integer(round((2.0**15.0-1.0)*cos(PHASE_ACCUM))),16));
       dac_channel_b_in    <= std_logic_vector(to_signed(integer(round((2.0**15.0-1.0)*sin(PHASE_ACCUM))),16));
-      dac_i_in            <= std_logic_vector(to_signed(integer(round((2.0**15.0-1.0)*sin(PHASE_ACCUM))),24));
+      dac_i_in            <= std_logic_vector(to_signed(integer(round((2.0**15.0-1.0)*cos(PHASE_ACCUM))),24));
       dac_q_in            <= std_logic_vector(to_signed(integer(round((2.0**15.0-1.0)*sin(PHASE_ACCUM))),24));
       wait until axis_clk = '1';
     end loop;
@@ -1209,7 +1209,7 @@ begin
         if (M_AXI_ARVALID = '1' AND M_AXI_ARREADY = '0') then
           M_AXI_ARREADY     <= '1';
           if (m_axi_arlen_cnt = 0) then
-            m_axi_araddr_base := to_integer(unsigned(M_AXI_ARADDR(12 downto 0)));
+            m_axi_araddr_base := to_integer(unsigned(M_AXI_ARADDR(15 downto 3)));
           end if;
           m_axi_arlen_cnt   := m_axi_arlen_cnt + to_integer(unsigned(M_AXI_ARLEN)) + 1;
         else
@@ -1222,7 +1222,7 @@ begin
   M_AXI_RRESP               <= "00";
 
   -------------------------------------------------------------------------------
-  -- AXI-Lite // Mechanism to access control & status registers
+  -- AXI-Lite // interface to access control & status registers
   -------------------------------------------------------------------------------
   proc_axi_lite_ctrl_reg : process(axis_clk,axis_rst_n)
   begin
@@ -1298,19 +1298,19 @@ begin
     wait until axis_rst_n = '1';
     wait until axis_clk = '1';
     -----------------------------------------------------------------------------
-    -- Set the first 256 words of memory to a counting pattern
+    -- Set the first 4096 words of memory to a sine wave
     -----------------------------------------------------------------------------
-    for i in 0 to 255 loop
+    for i in 0 to 4095 loop
       set_ram                   <= '1';
       set_ram_addr              <= i;
-      set_ram_data              <= std_logic_vector(to_unsigned(i+64,32)) & std_logic_vector(to_unsigned(i,32));
+      set_ram_data              <= (63 downto 48 => dac_channel_a_in(15)) & dac_channel_a_in & (31 downto 16 => dac_channel_b_in(15)) & dac_channel_b_in;
       wait until axis_clk = '1';
     end loop;
     set_ram                     <= '0';
     wait until axis_clk = '1';
     -----------------------------------------------------------------------------
-    -- Read the first 256 words from memory and write them back starting at
-    -- address 256.
+    -- Test AXI ACP interface with a loopback. Set ps_pl_interface to
+    -- read the first 256 words from memory and immediately write them back.
     -----------------------------------------------------------------------------
     -- Set ps_pl_interface Control Register Bank 2: MM2S Command Address
     --                       Accelerator & Register Bank
@@ -1335,7 +1335,7 @@ begin
     wait until axis_clk = '1';
     -- Set ps_pl_interface Control Register Bank 4: S2MM Command Address
     set_ctrl_addr               <= x"00" & x"04";
-    set_ctrl_data               <= std_logic_vector(to_unsigned(256,32));     -- Address
+    set_ctrl_data               <= std_logic_vector(to_unsigned(0,32));     -- Address
     set_ctrl                    <= '1';
     wait until set_ctrl_busy = '1';
     set_ctrl                    <= '0';
@@ -1382,16 +1382,18 @@ begin
     wait until set_status_busy = '0';
     wait until axis_clk = '1';
     -----------------------------------------------------------------------------
-    -- Setup spectrum_sense control registers to enable FFT and discard output.
+    -- Test spectrum sensing. Setup spectrum_sense to enable FFT, discard
+    -- output (i.e. do not route the FFT output to anywhere meaningful so it
+    -- can constantly run), and trigger on threshold exceeded
     -----------------------------------------------------------------------------
     -- Set spectrum_sense Control Register Bank 1
     set_ctrl_addr               <= x"02" & x"01";
     set_ctrl_data               <= (others=>'0');
     set_ctrl_data(4 downto 0)   <= "00111";           -- FFT Size ("00111" = 128)
     set_ctrl_data(5)            <= '1';               -- Set FFT Size
-    set_ctrl_data(9 downto 8)   <= "00";              -- FFT Mode "11", discard FFT output
+    set_ctrl_data(9 downto 8)   <= "11";              -- FFT Mode "11", discard FFT output
     set_ctrl_data(10)           <= '1';               -- Enable IRQ
-    set_ctrl_data(12)           <= '1';               -- Enable threshold not exceeded sideband signal
+    set_ctrl_data(11)           <= '1';               -- Enable threshold exceeded sideband signal
     set_ctrl_data(13)           <= '1';               -- Enable clear threshold latched
     set_ctrl                    <= '1';
     wait until set_ctrl_busy = '1';
@@ -1416,11 +1418,13 @@ begin
     wait until set_ctrl_busy = '0';
     wait until axis_clk = '1';
     -----------------------------------------------------------------------------
-    -- Setup usrp_ddr_interface_axis control registers to allow TX enable aux,
-    -- bypass floating point and interp/decim = 1 for both RX & TX, and
-    -- RX & TX gain.
+    -- Setup usrp_ddr_interface_axis to enable RX, bypass TX floating to fixed
+    -- point, set interp/decim rates, RX & TX gain, and MICTOR cable calibration.
     -----------------------------------------------------------------------------
     -- Set usrp_ddr_interface_axis Control Register Bank 0
+    -- Note: Tdest can only be set when a transfer is not in progress (i.e.
+    -- usrp_ddr_interface_axis rx_enable = 0). This prevents switching destinations
+    -- in the middle of a transfer, which may cause problems with the AXI interconnect
     set_ctrl_addr               <= x"01" & x"00";
     set_ctrl_data               <= (others=>'0');
     set_ctrl_data(31 downto 29) <= "010";             -- Master Tdest
@@ -1432,9 +1436,13 @@ begin
     -- Set usrp_ddr_interface_axis Control Register Bank 2
     set_ctrl_addr               <= x"01" & x"02";
     set_ctrl_data               <= (others=>'0');
-    set_ctrl_data(22 downto 0)  <= std_logic_vector(to_unsigned(128,23)); -- RX packet size
-    set_ctrl_data(23)           <= '0';                                   -- RX fix2float bypass
-    set_ctrl_data(24)           <= '1';                                   -- TX float2fix bypass
+    set_ctrl_data(23 downto 0)  <= std_logic_vector(to_unsigned(128,24)); -- RX packet size
+    set_ctrl_data(24)           <= '0';                                   -- RX fix2float bypass
+    set_ctrl_data(25)           <= '0';                                   -- RX CIC bypass
+    set_ctrl_data(26)           <= '0';                                   -- RX Halfband bypass
+    set_ctrl_data(27)           <= '1';                                   -- TX float2fix bypass
+    set_ctrl_data(28)           <= '0';                                   -- TX CIC bypass
+    set_ctrl_data(29)           <= '0';                                   -- TX Halfband bypass
     set_ctrl                    <= '1';
     wait until set_ctrl_busy = '1';
     set_ctrl                    <= '0';
@@ -1443,15 +1451,16 @@ begin
     -- Set usrp_ddr_interface_axis Control Register Bank 3
     set_ctrl_addr               <= x"01" & x"03";
     set_ctrl_data               <= (others=>'0');
-    set_ctrl_data(12 downto 0)  <= std_logic_vector(to_unsigned(1,13));   -- RX decimation
-    set_ctrl_data(28 downto 16) <= std_logic_vector(to_unsigned(1,13));   -- TX interpolation
+    set_ctrl_data(10 downto 0)  <= std_logic_vector(to_unsigned(4,11));   -- RX decimation
+    set_ctrl_data(26 downto 16) <= std_logic_vector(to_unsigned(4,11));   -- TX interpolation
     set_ctrl                    <= '1';
     wait until set_ctrl_busy = '1';
     set_ctrl                    <= '0';
     wait until set_ctrl_busy = '0';
     wait until axis_clk = '1';
-    -- Set usrp_ddr_interface_axis Control Register Bank 4
-    -- No gain needed since the interp / decim rates are set to 1 and our test sinusoid is already uses the full dynamic range
+    -- Set usrp_ddr_interface_axis Control Register Bank 4, RX gain
+    -- NOTE: If the CIC filter is bypassed, then gain can be safely set to 1 as our test sinusoid
+    -- already uses the full dynamic range.
     set_ctrl_addr               <= x"01" & x"04";
     set_ctrl_data               <= std_logic_vector(to_unsigned(1,32));   -- RX gain
     set_ctrl                    <= '1';
@@ -1459,7 +1468,9 @@ begin
     set_ctrl                    <= '0';
     wait until set_ctrl_busy = '0';
     wait until axis_clk = '1';
-    -- Set usrp_ddr_interface_axis Control Register Bank 5
+    -- Set usrp_ddr_interface_axis Control Register Bank 5, TX gain
+    -- NOTE: If the CIC filter is bypassed, then gain can be safely set to 1 as our test sinusoid
+    -- already uses the full dynamic range.
     set_ctrl_addr               <= x"01" & x"05";
     set_ctrl_data               <= std_logic_vector(to_unsigned(1,32));   -- TX gain
     set_ctrl                    <= '1';
@@ -1467,7 +1478,7 @@ begin
     set_ctrl                    <= '0';
     wait until set_ctrl_busy = '0';
     wait until axis_clk = '1';
-    -- Set usrp_ddr_interface_axis Control Register Bank 6
+    -- Set MMCM phase values to calibrate MICTOR cable
     set_ctrl_addr               <= x"01" & x"06";
     set_ctrl_data               <= (others=>'0');
     set_ctrl_data(0)            <= '1';                                   -- RX restart calibration
@@ -1510,8 +1521,7 @@ begin
       wait until axis_clk = '1';
     end loop;
     wait until axis_clk = '1';
-    -- Enable TX Enable Aux to kickoff the entire simulation
-    -- Set usrp_ddr_interface_axis Control Register Bank 0
+    -- Enable RX to kickoff spectrum sensing. Route RX data to spectrum_sense
     set_ctrl_addr               <= x"01" & x"00";
     set_ctrl_data               <= (others=>'0');
     set_ctrl_data(0)            <= '1';               -- RX Enable
@@ -1523,8 +1533,8 @@ begin
     wait until set_ctrl_busy = '0';
     wait until axis_clk = '1';
     -----------------------------------------------------------------------------
-    -- Setup transfer from RAM to usrp_ddr_intf_axis AXI-Stream slave interface
-    -- which is tdest = "001"
+    -- Setup ps_pl_interface to transfer TX data from RAM to usrp_ddr_intf_axis
+    -- which is AXI-Stream slave interface "001"
     -----------------------------------------------------------------------------
     -- Set ps_pl_interface Control Register Bank 2: MM2S Command Address
     set_ctrl_addr               <= x"00" & x"02";
@@ -1537,7 +1547,7 @@ begin
     -- Set ps_pl_interface Control Register Bank 3: MM2S Command Size, Cache, tdest
     set_ctrl_addr               <= x"00" & x"03";
     set_ctrl_data               <= (others=>'0');
-    set_ctrl_data(22 downto 0)  <= std_logic_vector(to_unsigned(256*8,23));   -- Number of bytes to transfer
+    set_ctrl_data(22 downto 0)  <= std_logic_vector(to_unsigned(4096*8,23));  -- Number of bytes to transfer
     set_ctrl_data(25 downto 23) <= "001";                                     -- Tdest
     set_ctrl_data(31)           <= '1';                                       -- Push command to FIFO
     set_ctrl                    <= '1';
@@ -1546,9 +1556,8 @@ begin
     wait until set_ctrl_busy = '0';
     wait until axis_clk = '1';
     -----------------------------------------------------------------------------
-    -- Setup usrp_ddr_interface_axis control registers to allow TX enable aux,
-    -- bypass floating point and interp/decim = 1 for both RX & TX, and
-    -- RX & TX gain.
+    -- Setup usrp_ddr_interface_axis control registers to enable TX to trigger
+    -- if the spectrum sensing threshold is exceeded.
     -----------------------------------------------------------------------------
     -- Enable TX Enable Aux to kickoff the entire simulation
     -- Set usrp_ddr_interface_axis Control Register Bank 0
@@ -1556,63 +1565,12 @@ begin
     set_ctrl_data               <= (others=>'0');
     set_ctrl_data(0)            <= '1';               -- RX Enable
     set_ctrl_data(3)            <= '1';               -- TX Enable Aux
-    -- This control register is a kludge that allows us to spectrum sense at 100MHz and 50MHz sample rates.
-    -- This is not necessary at 25MHz or lower sampling rates and infact should not be used
-    -- due to the added latency of having to refill the filtering pipeline.
-    -- ====> Commented out as decim = 4: set_ctrl_data(4)            <= '1';               -- Enable Reset on RX tlast
     set_ctrl_data(31 downto 29) <= "010";             -- Master Tdest
     set_ctrl                    <= '1';
     wait until set_ctrl_busy = '1';
     set_ctrl                    <= '0';
     wait until set_ctrl_busy = '0';
     wait until axis_clk = '1';
-    -----------------------------------------------------------------------------
-    -- Looping Writes to S2MM
-    -----------------------------------------------------------------------------
-    loop
-      -- Set ps_pl_interface Control Register Bank 4: S2MM Command Address
-      set_ctrl_addr               <= x"00" & x"04";
-      set_ctrl_data               <= std_logic_vector(to_unsigned(256,32));     -- Address
-      set_ctrl                    <= '1';
-      wait until set_ctrl_busy = '1';
-      set_ctrl                    <= '0';
-      wait until set_ctrl_busy = '0';
-      wait until axis_clk = '1';
-      -- Set ps_pl_interface Control Register Bank 5: S2MM Command Size, Cache, tdest
-      set_ctrl_addr               <= x"00" & x"05";
-      set_ctrl_data               <= (others=>'0');
-      set_ctrl_data(22 downto 0)  <= std_logic_vector(to_unsigned(128*8,23));   -- Number of bytes to transfer
-      set_ctrl_data(25 downto 23) <= "010";                                     -- Tdest
-      set_ctrl_data(31)           <= '1';                                       -- Push command to FIFO
-      set_ctrl                    <= '1';
-      wait until set_ctrl_busy = '1';
-      set_ctrl                    <= '0';
-      wait until set_ctrl_busy = '0';
-      wait until axis_clk = '1';
-      -- Read ps_pl_interface sts FIFO is empty
-      set_status_addr             <= x"00" & x"08";
-      set_status                  <= '1';
-      wait until set_status_busy = '1';
-      set_status                  <= '0';
-      wait until set_status_busy = '0';
-      wait until axis_clk = '1';
-      ---- While s2mm sts FIFO is empty
-      while (set_status_data(2) = '1') loop
-        set_status                <= '1';
-        wait until set_status_busy = '1';
-        set_status                <= '0';
-        wait until set_status_busy = '0';
-        wait until axis_clk = '1';
-      end loop;
-      -- Read S2MM STS FIFO
-      set_status_addr             <= x"00" & x"07";
-      set_status                  <= '1';
-      wait until set_status_busy = '1';
-      set_status                  <= '0';
-      wait until set_status_busy = '0';
-      wait until axis_clk = '1';
-      wait for 100 us;
-    end loop;
     wait;
   end process;
 
