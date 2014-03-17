@@ -1312,8 +1312,16 @@ begin
     -- Test AXI ACP interface with a loopback. Set ps_pl_interface to
     -- read the first 256 words from memory and immediately write them back.
     -----------------------------------------------------------------------------
+    -- Enable MM2S and S2MM xfers
+    set_ctrl_addr               <= x"00" & x"00";
+    set_ctrl_data(0)            <= '1';
+    set_ctrl_data(1)            <= '1';
+    set_ctrl                    <= '1';
+    wait until set_ctrl_busy = '1';
+    set_ctrl                    <= '0';
+    wait until set_ctrl_busy = '0';
+    wait until axis_clk = '1';
     -- Set ps_pl_interface Control Register Bank 2: MM2S Command Address
-    --                       Accelerator & Register Bank
     set_ctrl_addr               <= x"00" & x"02";
     set_ctrl_data               <= (others=>'0');                             -- Address
     set_ctrl                    <= '1';
@@ -1438,11 +1446,11 @@ begin
     set_ctrl_data               <= (others=>'0');
     set_ctrl_data(23 downto 0)  <= std_logic_vector(to_unsigned(128,24)); -- RX packet size
     set_ctrl_data(24)           <= '0';                                   -- RX fix2float bypass
-    set_ctrl_data(25)           <= '0';                                   -- RX CIC bypass
-    set_ctrl_data(26)           <= '0';                                   -- RX Halfband bypass
+    set_ctrl_data(25)           <= '1';                                   -- RX CIC bypass
+    set_ctrl_data(26)           <= '1';                                   -- RX Halfband bypass
     set_ctrl_data(27)           <= '1';                                   -- TX float2fix bypass
-    set_ctrl_data(28)           <= '0';                                   -- TX CIC bypass
-    set_ctrl_data(29)           <= '0';                                   -- TX Halfband bypass
+    set_ctrl_data(28)           <= '1';                                   -- TX CIC bypass
+    set_ctrl_data(29)           <= '1';                                   -- TX Halfband bypass
     set_ctrl                    <= '1';
     wait until set_ctrl_busy = '1';
     set_ctrl                    <= '0';
@@ -1451,8 +1459,8 @@ begin
     -- Set usrp_ddr_interface_axis Control Register Bank 3
     set_ctrl_addr               <= x"01" & x"03";
     set_ctrl_data               <= (others=>'0');
-    set_ctrl_data(10 downto 0)  <= std_logic_vector(to_unsigned(4,11));   -- RX decimation
-    set_ctrl_data(26 downto 16) <= std_logic_vector(to_unsigned(4,11));   -- TX interpolation
+    set_ctrl_data(10 downto 0)  <= std_logic_vector(to_unsigned(1,11));   -- RX decimation
+    set_ctrl_data(26 downto 16) <= std_logic_vector(to_unsigned(1,11));   -- TX interpolation
     set_ctrl                    <= '1';
     wait until set_ctrl_busy = '1';
     set_ctrl                    <= '0';
@@ -1526,6 +1534,7 @@ begin
     set_ctrl_data               <= (others=>'0');
     set_ctrl_data(0)            <= '1';               -- RX Enable
     set_ctrl_data(3)            <= '0';               -- TX Enable Aux
+    set_ctrl_data(6)            <= '1';               -- RX FIFO Bypass
     set_ctrl_data(31 downto 29) <= "010";             -- Master Tdest
     set_ctrl                    <= '1';
     wait until set_ctrl_busy = '1';
@@ -1565,6 +1574,7 @@ begin
     set_ctrl_data               <= (others=>'0');
     set_ctrl_data(0)            <= '1';               -- RX Enable
     set_ctrl_data(3)            <= '1';               -- TX Enable Aux
+    set_ctrl_data(6)            <= '1';               -- RX FIFO Bypass
     set_ctrl_data(31 downto 29) <= "010";             -- Master Tdest
     set_ctrl                    <= '1';
     wait until set_ctrl_busy = '1';

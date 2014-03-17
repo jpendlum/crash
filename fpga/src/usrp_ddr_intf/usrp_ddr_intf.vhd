@@ -121,6 +121,7 @@ entity usrp_ddr_intf is
     rx_fifo_empty           : out   std_logic;                      -- Receive data FIFO empty
     rx_fifo_almost_empty    : out   std_logic;                      -- Receive data FIFO almost empty
     rx_fifo_overflow_latch  : out   std_logic;                      -- Receive data FIFO overflow (clears on reset)
+    rx_fifo_overflow_clr    : in    std_logic;                      -- Receive data FIFO clears overflow latch
     -- Receive data FIFO interface (all signals on clk_tx_fifo clock domain)
     clk_tx_fifo             : in    std_logic;                      -- Transmit data FIFO clock
     tx_fifo_reset           : in    std_logic;                      -- Transmit data FIFO reset
@@ -130,7 +131,8 @@ entity usrp_ddr_intf is
     tx_fifo_overflow        : out   std_logic;                      -- Transmit data FIFO overflow
     tx_fifo_full            : out   std_logic;                      -- Transmit data FIFO full
     tx_fifo_almost_full     : out   std_logic;                      -- Transmit data FIFO almost full
-    tx_fifo_underflow_latch : out   std_logic);                     -- Transmit data FIFO underflow (clears on reset)
+    tx_fifo_underflow_latch : out   std_logic;                      -- Transmit data FIFO underflow (clears on reset)
+    tx_fifo_underflow_clr   : in    std_logic);                     -- Transmit data FIFO clears underflow latch
 end entity;
 
 architecture RTL of usrp_ddr_intf is
@@ -181,7 +183,7 @@ architecture RTL of usrp_ddr_intf is
       LOCKED                    : out    std_logic);
   end component;
 
-  component fifo_64x4096 is
+  component fifo_64x8192 is
     port (
       wr_rst                    : in std_logic;
       wr_clk                    : in std_logic;
@@ -506,6 +508,7 @@ architecture RTL of usrp_ddr_intf is
   signal rx_fifo_almost_full          : std_logic;
   signal rx_fifo_overflow             : std_logic;
   signal rx_fifo_overflow_latch_int   : std_logic;
+  signal rx_fifo_overflow_clr_sync    : std_logic;
   signal rx_fifo_din                  : std_logic_vector(63 downto 0);
   signal rx_fifo_dout                 : std_logic_vector(63 downto 0);
 
@@ -560,6 +563,7 @@ architecture RTL of usrp_ddr_intf is
   signal tx_fifo_almost_empty         : std_logic;
   signal tx_fifo_underflow            : std_logic;
   signal tx_fifo_underflow_latch_int  : std_logic;
+  signal tx_fifo_underflow_clr_sync   : std_logic;
   signal tx_fifo_din                  : std_logic_vector(63 downto 0);
   signal tx_fifo_dout                 : std_logic_vector(63 downto 0);
 
@@ -926,9 +930,9 @@ begin
   rx_fifo_data_i                      <= rx_fifo_dout(63 downto 32);
   rx_fifo_data_q                      <= rx_fifo_dout(31 downto 0);
 
-  inst_rx_data_fifo_64x4096 : fifo_64x4096
+  inst_rx_data_fifo_64x8192 : fifo_64x8192
     port map (
-      wr_rst                          => rx_reset,
+      wr_rst                          => '0',
       wr_clk                          => clk_rx,
       rd_rst                          => rx_fifo_reset,
       rd_clk                          => clk_rx_fifo,
@@ -952,6 +956,9 @@ begin
       if rising_edge(clk_rx) then
         if (rx_fifo_wr_en = '1' AND rx_fifo_full = '1') then
           rx_fifo_overflow_latch_int  <= '1';
+        end if;
+        if (rx_fifo_overflow_clr_sync = '1') then
+          rx_fifo_overflow_latch_int  <= '0';
         end if;
       end if;
     end if;
@@ -980,9 +987,9 @@ begin
   -- Transmit 16-bit TX I/Q data at 200 MHz DDR.
 
   -- Buffer TX data so we can correct data alignment
-  proc_tx_data_1x : process(clk_tx, tx_reset)
+  proc_tx_data_1x : process(clk_tx, tx_enable)
   begin
-    if (tx_reset = '1') then
+    if (tx_enable = '0') then
       tx_data_a                     <= (others=>'0');
       tx_data_b                     <= (others=>'0');
     else
@@ -1176,11 +1183,11 @@ begin
   tx_data_i                         <= tx_fifo_dout(63 downto 32);
   tx_data_q                         <= tx_fifo_dout(31 downto 0);
 
-  inst_tx_data_fifo_64x4096 : fifo_64x4096
+  inst_tx_data_fifo_64x8192 : fifo_64x8192
     port map (
       wr_rst                        => tx_fifo_reset,
       wr_clk                        => clk_tx_fifo,
-      rd_rst                        => tx_reset,
+      rd_rst                        => '0',
       rd_clk                        => clk_tx,
       din                           => tx_fifo_din,
       wr_en                         => tx_fifo_wr_en_int,
@@ -1202,6 +1209,9 @@ begin
       if rising_edge(clk_tx) then
         if (tx_fifo_rd_en_int = '1' AND tx_fifo_empty = '1') then
           tx_fifo_underflow_latch_int     <= '1';
+        end if;
+        if (tx_fifo_underflow_clr_sync = '1') then
+          tx_fifo_underflow_latch_int     <= '0';
         end if;
       end if;
     end if;
@@ -1389,9 +1399,17 @@ begin
   inst_rx_overflow_latch_synchronizer : synchronizer
     port map (
       clk                             => clk_rx_fifo,
-      reset                           => rx_fifo_reset,
+      reset                           => rx_enable,
       async                           => rx_fifo_overflow_latch_int,
       sync                            => rx_fifo_overflow_latch);
+
+  -- Sychronizer for rx overflow latch clear
+  inst_rx_overflow_clr_synchronizer : synchronizer
+    port map (
+      clk                             => clk_rx,
+      reset                           => rx_reset,
+      async                           => rx_fifo_overflow_clr,
+      sync                            => rx_fifo_overflow_clr_sync);
 
   -- Sychronizer for tx underflow latch
   inst_tx_underflow_latch_synchronizer : synchronizer
@@ -1400,6 +1418,14 @@ begin
       reset                           => tx_fifo_reset,
       async                           => tx_fifo_underflow_latch_int,
       sync                            => tx_fifo_underflow_latch);
+
+  -- Sychronizer for tx underflow latch
+  inst_tx_underflow_clr_synchronizer : synchronizer
+    port map (
+      clk                             => clk_tx,
+      reset                           => tx_reset,
+      async                           => tx_fifo_underflow_clr,
+      sync                            => tx_fifo_underflow_clr_sync);
 
   -----------------------------------------------------------------------------
   -- Internal signals to output ports

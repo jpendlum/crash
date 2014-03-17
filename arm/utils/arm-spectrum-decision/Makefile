@@ -1,7 +1,7 @@
 TARGET = arm-spectrum-decision
-LIBS = -ludev -lm
+LIBS = -lcrash -lm
 CC = gcc
-CFLAGS = -O0 -Wall
+CFLAGS = -Wall -mfpu=neon
 
 .PHONY: default all clean
 

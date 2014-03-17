@@ -14,9 +14,9 @@
 **
 **
 **
-**  File:         record-samples.c
+**  File:         transmit-samples.c
 **  Author(s):    Jonathon Pendlum (jon.pendlum@gmail.com)
-**  Description:  Record data from CRASH
+**  Description:  Transmit data via CRASH
 **
 ******************************************************************************/
 #include <stdio.h>
@@ -41,7 +41,7 @@ int main (int argc, char **argv) {
   int i;
   bool interrupt_flag = false;
   uint number_samples = 0;
-  uint decim_rate = 0;
+  uint interp_rate = 0;
   double gain = 0.0;
   struct crash_plblock *usrp_intf;
 
@@ -52,13 +52,13 @@ int main (int argc, char **argv) {
          We distinguish them by their indices. */
       {"interrupt",   no_argument,       0, 'i'},
       {"samples",     required_argument, 0, 'n'},
-      {"decim",       required_argument, 0, 'd'},
+      {"interp",      required_argument, 0, 'u'},
       {0, 0, 0, 0}
     };
     /* getopt_long stores the option index here. */
     int option_index = 0;
     // 'n' is the short option, ':' means it requires an argument
-    c = getopt_long (argc, argv, "in:d:",
+    c = getopt_long (argc, argv, "in:u:",
                      long_options, &option_index);
     /* Detect the end of the options. */
     if (c == -1) break;
@@ -70,8 +70,8 @@ int main (int argc, char **argv) {
       case 'n':
         number_samples = atoi(optarg);
         break;
-      case 'd':
-        decim_rate = atoi(optarg);
+      case 'u':
+        interp_rate = atoi(optarg);
         break;
       case '?':
         /* getopt_long already printed an error message. */
@@ -96,18 +96,18 @@ int main (int argc, char **argv) {
     number_samples = 4096;
   }
 
-  if (decim_rate == 0) {
-    printf("INFO: Decimation rate not specified, defaulting to 8\n");
-    decim_rate = 8;
+  if (interp_rate == 0) {
+    printf("INFO: Interpolation rate not specified, defaulting to 8\n");
+    interp_rate = 8;
   }
 
-  if (decim_rate > 2047) {
-    printf("ERROR: Decimation rate too high\n");
+  if (interp_rate > 2047) {
+    printf("ERROR: Interpolation rate too high\n");
     return -1;
   }
 
 
-  usrp_intf = crash_open(USRP_INTF_PLBLOCK_ID,READ);
+  usrp_intf = crash_open(USRP_INTF_PLBLOCK_ID,WRITE);
   if (usrp_intf == 0) {
     printf("ERROR: Failed to allocate usrp_intf plblock\n");
     return -1;
@@ -143,53 +143,53 @@ int main (int argc, char **argv) {
   crash_write_reg(usrp_intf->regs,USRP_USRP_MODE_CTRL,TX_DAC_RAW_MODE + RX_ADC_DSP_MODE);
   while(crash_get_bit(usrp_intf->regs,USRP_UART_BUSY));
 
-  crash_write_reg(usrp_intf->regs, USRP_AXIS_MASTER_TDEST, DMA_PLBLOCK_ID);   // Set tdest to ps_pl_interface
-  crash_write_reg(usrp_intf->regs, USRP_RX_PACKET_SIZE, number_samples);      // Set packet size
-  crash_clear_bit(usrp_intf->regs, USRP_RX_FIX2FLOAT_BYPASS);                 // Do not bypass fix2float
-  if (decim_rate == 1) {
-    crash_set_bit(usrp_intf->regs, USRP_RX_CIC_BYPASS);                       // Bypass CIC Filter
-    crash_set_bit(usrp_intf->regs, USRP_RX_HB_BYPASS);                        // Bypass HB Filter
-    crash_write_reg(usrp_intf->regs, USRP_RX_GAIN, 1);                        // Set gain = 1
-  } else if (decim_rate == 2) {
-    crash_set_bit(usrp_intf->regs, USRP_RX_CIC_BYPASS);                       // Bypass CIC Filter
-    crash_clear_bit(usrp_intf->regs, USRP_RX_HB_BYPASS);                      // Enable HB Filter
-    crash_write_reg(usrp_intf->regs, USRP_RX_GAIN, 1);                        // Set gain = 1
+  crash_clear_bit(usrp_intf->regs, USRP_TX_FIX2FLOAT_BYPASS);                 // Do not bypass fix2float
+  if (interp_rate == 1) {
+    crash_set_bit(usrp_intf->regs, USRP_TX_CIC_BYPASS);                       // Bypass CIC Filter
+    crash_set_bit(usrp_intf->regs, USRP_TX_HB_BYPASS);                        // Bypass HB Filter
+    crash_write_reg(usrp_intf->regs, USRP_TX_GAIN, 1);                        // Set gain = 1
+  } else if (interp_rate == 2) {
+    crash_set_bit(usrp_intf->regs, USRP_TX_CIC_BYPASS);                       // Bypass CIC Filter
+    crash_clear_bit(usrp_intf->regs, USRP_TX_HB_BYPASS);                      // Enable HB Filter
+    crash_write_reg(usrp_intf->regs, USRP_TX_GAIN, 1);                        // Set gain = 1
   // Even, use both CIC and Halfband filters
-  } else if ((decim_rate % 2) == 0) {
-    crash_clear_bit(usrp_intf->regs, USRP_RX_CIC_BYPASS);                     // Enable CIC Filter
-    crash_write_reg(usrp_intf->regs, USRP_RX_CIC_DECIM, decim_rate/2);        // Set CIC decimation rate (div by 2 as we are using HB filter)
-    crash_clear_bit(usrp_intf->regs, USRP_RX_HB_BYPASS);                      // Enable HB Filter
+  } else if ((interp_rate % 2) == 0) {
+    crash_clear_bit(usrp_intf->regs, USRP_TX_CIC_BYPASS);                     // Enable CIC Filter
+    crash_write_reg(usrp_intf->regs, USRP_TX_CIC_INTERP, interp_rate/2);      // Set CIC decimation rate (div by 2 as we are using HB filter)
+    crash_clear_bit(usrp_intf->regs, USRP_TX_HB_BYPASS);                      // Enable HB Filter
     // Offset CIC bit growth. A 32-bit multiplier in the receive chain allows us
     // to scale the CIC output.
-    gain = 26.0-3.0*log2(decim_rate/2);
+    gain = 20.0-2.0*log2(interp_rate/2);
     gain = (gain > 1.0) ? (ceil(pow(2.0,gain))) : (1.0);                      // Do not allow gain to be set to 0
-    crash_write_reg(usrp_intf->regs, USRP_RX_GAIN, (uint32_t)gain);           // Set gain
+    crash_write_reg(usrp_intf->regs, USRP_TX_GAIN, (uint32_t)gain);           // Set gain
   // Odd, use only CIC filter
   } else {
-    crash_clear_bit(usrp_intf->regs, USRP_RX_CIC_BYPASS);                     // Enable CIC Filter
-    crash_write_reg(usrp_intf->regs, USRP_RX_CIC_DECIM, decim_rate);          // Set CIC decimation rate
-    crash_set_bit(usrp_intf->regs, USRP_RX_HB_BYPASS);                        // Bypass HB Filter
+    crash_clear_bit(usrp_intf->regs, USRP_TX_CIC_BYPASS);                     // Enable CIC Filter
+    crash_write_reg(usrp_intf->regs, USRP_TX_CIC_INTERP, interp_rate);        // Set CIC decimation rate
+    crash_set_bit(usrp_intf->regs, USRP_TX_HB_BYPASS);                        // Bypass HB Filter
     //
-    gain = 26.0-3.0*log2(decim_rate);
+    gain = 20.0-2.0*log2(interp_rate);
     gain = (gain > 1.0) ? (ceil(pow(2.0,gain))) : (1.0);                      // Do not allow gain to be set to 0
     crash_write_reg(usrp_intf->regs, USRP_RX_GAIN, (uint32_t)gain);           // Set gain
   }
 
-  crash_set_bit(usrp_intf->regs, USRP_RX_ENABLE);                             // Enable RX
+    // Create and Send a CW signal
+  float *tx_sample = (float *)usrp_intf->dma_buff;
+  for (i = 0; i < number_samples; i++) {
+    tx_sample[2*i+1] = 0.0;
+    tx_sample[2*i] = 0.9;
+  }
 
   // Read from usrp_intf
-  crash_read(usrp_intf, USRP_INTF_PLBLOCK_ID, number_samples);
-  crash_read(usrp_intf, USRP_INTF_PLBLOCK_ID, number_samples);
-  crash_read(usrp_intf, USRP_INTF_PLBLOCK_ID, number_samples);
-  crash_read(usrp_intf, USRP_INTF_PLBLOCK_ID, number_samples);
+  crash_write(usrp_intf, USRP_INTF_PLBLOCK_ID, number_samples);
 
-  crash_clear_bit(usrp_intf->regs, USRP_RX_ENABLE);                           // Disable RX
+  crash_set_bit(usrp_intf->regs, USRP_TX_ENABLE);                           // Enable TX
 
   float *sample = (float*)(usrp_intf->dma_buff);
 
   printf("I:\tQ:\n");
   for (i = 32; i < 63; i++) {
-    printf("%f\t%f\n",(sample[2*i+1]), (sample[2*i]));
+    printf("%f\t%f\n",(sample[2*i]), (sample[2*i+1]));
   }
 
   // Write number_samples complex samples to file
@@ -198,6 +198,7 @@ int main (int argc, char **argv) {
   fwrite(sample,number_samples,sizeof(uint64_t),fp);
   fclose(fp);
 
+  crash_clear_bit(usrp_intf->regs, USRP_TX_ENABLE);                         // Disable RX
   crash_close(usrp_intf);
   return 0;
 }

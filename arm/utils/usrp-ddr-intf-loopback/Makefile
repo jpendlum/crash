@@ -1,7 +1,7 @@
 TARGET = usrp-ddr-intf-loopback
-LIBS = -ludev -lm
+LIBS = -lcrash -lm
 CC = gcc
-CFLAGS = -O0 -Wall
+CFLAGS = -Wall
 
 .PHONY: default all clean
 

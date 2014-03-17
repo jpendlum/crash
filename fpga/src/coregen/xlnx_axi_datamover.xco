@@ -1,7 +1,7 @@
 ##############################################################
 #
-# Xilinx Core Generator version 14.6
-# Date: Tue Jan 21 20:08:10 2014
+# Xilinx Core Generator version 14.7
+# Date: Thu Mar 13 01:56:06 2014
 #
 ##############################################################
 #
@@ -57,7 +57,7 @@ CSET c_m_axis_mm2s_tdata_width=64
 CSET c_mm2s_addr_pipe_depth=30
 CSET c_mm2s_btt_used=23
 CSET c_mm2s_burst_size=16
-CSET c_mm2s_include_sf=false
+CSET c_mm2s_include_sf=true
 CSET c_mm2s_stscmd_fifo_depth=1
 CSET c_mm2s_stscmd_is_async=false
 CSET c_s2mm_addr_pipe_depth=30
@@ -74,4 +74,4 @@ CSET component_name=xlnx_axi_datamover
 MISC pkg_timestamp=2012-06-04T10:16:25Z
 # END Extra information
 GENERATE
-# CRC: 70ae57a9
+# CRC: 634bf84e

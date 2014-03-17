@@ -133,6 +133,7 @@ architecture RTL of usrp_ddr_intf_axis is
       rx_fifo_empty           : out   std_logic;                      -- Receive data FIFO empty
       rx_fifo_almost_empty    : out   std_logic;                      -- Receive data FIFO almost empty
       rx_fifo_overflow_latch  : out   std_logic;                      -- Receive data FIFO overflow (clears on reset)
+      rx_fifo_overflow_clr    : in    std_logic;                      -- Receive data FIFO clears overflow latch
       -- Receive data FIFO interface (all signals on clk_tx_fifo clock domain)
       clk_tx_fifo             : in    std_logic;                      -- Transmit data FIFO clock
       tx_fifo_reset           : in    std_logic;                      -- Transmit data FIFO reset
@@ -142,23 +143,8 @@ architecture RTL of usrp_ddr_intf_axis is
       tx_fifo_overflow        : out   std_logic;                      -- Transmit data FIFO overflow
       tx_fifo_full            : out   std_logic;                      -- Transmit data FIFO full
       tx_fifo_almost_full     : out   std_logic;                      -- Transmit data FIFO almost full
-      tx_fifo_underflow_latch : out   std_logic);                     -- Transmit data FIFO underflow (clears on reset)
-  end component;
-
-  component fifo_buffer_64x16
-    port (
-      clk                     : in    std_logic;
-      srst                    : in    std_logic;
-      din                     : in    std_logic_vector(63 downto 0);
-      wr_en                   : in    std_logic;
-      rd_en                   : in    std_logic;
-      dout                    : out   std_logic_vector(63 downto 0);
-      full                    : out   std_logic;
-      almost_full             : out   std_logic;
-      overflow                : out   std_logic;
-      empty                   : out   std_logic;
-      almost_empty            : out   std_logic;
-      underflow               : out   std_logic);
+      tx_fifo_underflow_latch : out   std_logic;                      -- Transmit data FIFO underflow (clears on reset)
+      tx_fifo_underflow_clr   : in    std_logic);                     -- Transmit data FIFO clears underflow latch
   end component;
 
   component synchronizer is
@@ -255,6 +241,7 @@ architecture RTL of usrp_ddr_intf_axis is
   signal rx_fifo_empty_n                : std_logic;
   signal rx_fifo_almost_empty           : std_logic;
   signal rx_fifo_overflow_latch         : std_logic;
+  signal rx_fifo_overflow_clr           : std_logic;
   signal clk_tx_fifo                    : std_logic;
   signal tx_fifo_reset                  : std_logic;
   signal tx_fifo_data_i                 : std_logic_vector(31 downto 0);
@@ -264,17 +251,10 @@ architecture RTL of usrp_ddr_intf_axis is
   signal tx_fifo_full                   : std_logic;
   signal tx_fifo_almost_full            : std_logic;
   signal tx_fifo_underflow_latch        : std_logic;
+  signal tx_fifo_underflow_clr          : std_logic;
 
   signal clk_ddr_locked                 : std_logic;
   signal cal_complete                   : std_logic;
-
-  signal rx_fifo_buffer_srst            : std_logic;
-  signal rx_fifo_buffer_din             : std_logic_vector(63 downto 0);
-  signal rx_fifo_buffer_wr_en           : std_logic;
-  signal rx_fifo_buffer_rd_en           : std_logic;
-  signal rx_fifo_buffer_dout            : std_logic_vector(63 downto 0);
-  signal rx_fifo_buffer_full            : std_logic;
-  signal rx_fifo_buffer_empty           : std_logic;
 
   signal async                          : std_logic_vector(30 downto 0);
   signal sync                           : std_logic_vector(30 downto 0);
@@ -282,7 +262,6 @@ architecture RTL of usrp_ddr_intf_axis is
   signal rx_cic_decim_ack_sync          : std_logic;
   signal tx_cic_interp_ack_sync         : std_logic;
   signal rx_fifo_overflow_latch_sync    : std_logic;
-  signal rx_fifo_buffer_overflow_latch  : std_logic;
   signal tx_fifo_underflow_latch_sync   : std_logic;
   signal clk_ddr_locked_sync            : std_logic;
   signal clk_rx_phase_sync              : std_logic_vector(9 downto 0);
@@ -293,6 +272,7 @@ architecture RTL of usrp_ddr_intf_axis is
   signal tx_phase_busy_sync             : std_logic;
   signal uart_busy_sync                 : std_logic;
 
+  signal rx_fifo_bypass                 : std_logic;
   signal rx_enable_sideband             : std_logic;
   signal tx_enable_sideband             : std_logic;
   signal rx_enable_aux_reg              : std_logic;
@@ -381,10 +361,10 @@ begin
   -- AXIS Stream to TX Data
   -------------------------------------------------------------------------------
   clk_tx_fifo                                   <= clk;
-  tx_fifo_data_i                                <= axis_slave_tdata(63 downto 32);
-  tx_fifo_data_q                                <= axis_slave_tdata(31 downto 0);
+  tx_fifo_data_q                                <= axis_slave_tdata(63 downto 32);
+  tx_fifo_data_i                                <= axis_slave_tdata(31 downto 0);
   tx_fifo_wr_en                                 <= axis_slave_tvalid;
-  axis_slave_tready                             <= NOT(tx_fifo_almost_full);
+  axis_slave_tready                             <= NOT(tx_fifo_full);
 
   -------------------------------------------------------------------------------
   -- RX Data to AXIS Stream
@@ -400,7 +380,7 @@ begin
           rx_fifo_cnt                           <= to_integer(unsigned(rx_packet_size));
         else
           -- Decrement only on successful reads from the FIFO
-          if (axis_master_tready = '1' AND rx_fifo_buffer_empty = '0') then
+          if (axis_master_tready = '1' AND rx_fifo_empty = '0') then
             rx_fifo_cnt                         <= rx_fifo_cnt - 1;
             if (rx_fifo_cnt = 1) then
               rx_fifo_cnt                       <= to_integer(unsigned(rx_packet_size));
@@ -411,29 +391,9 @@ begin
     end if;
   end process;
 
-  -- This FIFO automatically empties samples on overflow.
-  rx_fifo_buffer_64x16 : fifo_buffer_64x16
-    port map (
-      clk                                       => clk,
-      srst                                      => rx_fifo_buffer_srst,
-      din                                       => rx_fifo_buffer_din,
-      wr_en                                     => rx_fifo_buffer_wr_en,
-      rd_en                                     => rx_fifo_buffer_rd_en,
-      dout                                      => rx_fifo_buffer_dout,
-      full                                      => rx_fifo_buffer_full,
-      almost_full                               => open,
-      overflow                                  => open,
-      empty                                     => rx_fifo_buffer_empty,
-      almost_empty                              => open,
-      underflow                                 => open);
-
-  rx_fifo_buffer_srst                           <= NOT(rx_enable);
-  rx_fifo_buffer_wr_en                          <= NOT(rx_fifo_empty) AND rx_enable;
-  rx_fifo_buffer_rd_en                          <= axis_master_tready OR rx_fifo_buffer_full;
-  rx_fifo_buffer_din                            <= rx_fifo_data_i & rx_fifo_data_q;
-
-  axis_master_tdata                             <= rx_fifo_buffer_dout;
-  axis_master_tvalid                            <= NOT(rx_fifo_buffer_empty) AND rx_enable;
+  rx_fifo_rd_en                                 <= (axis_master_tready OR rx_fifo_bypass) AND NOT(rx_fifo_empty) AND rx_enable;
+  axis_master_tdata                             <= rx_fifo_data_q & rx_fifo_data_i;
+  axis_master_tvalid                            <= (NOT(rx_fifo_empty) AND rx_enable);
   axis_master_tlast                             <= '1' when rx_fifo_cnt = 1 AND rx_enable = '1' else '0';
   axis_master_tdest                             <= axis_master_tdest_safe;
 
@@ -498,6 +458,7 @@ begin
       rx_fifo_empty                             => rx_fifo_empty,
       rx_fifo_almost_empty                      => rx_fifo_almost_empty,
       rx_fifo_overflow_latch                    => rx_fifo_overflow_latch,
+      rx_fifo_overflow_clr                      => rx_fifo_overflow_clr,
       clk_tx_fifo                               => clk,
       tx_fifo_reset                             => tx_fifo_reset,
       tx_fifo_data_i                            => tx_fifo_data_i,
@@ -506,10 +467,8 @@ begin
       tx_fifo_overflow                          => tx_fifo_overflow,
       tx_fifo_full                              => tx_fifo_full,
       tx_fifo_almost_full                       => tx_fifo_almost_full,
-      tx_fifo_underflow_latch                   => tx_fifo_underflow_latch);
-
-  -- Always read unless empty
-  rx_fifo_rd_en                                 <= NOT(rx_fifo_empty);
+      tx_fifo_underflow_latch                   => tx_fifo_underflow_latch,
+      tx_fifo_underflow_clr                     => tx_fifo_underflow_clr);
 
   -------------------------------------------------------------------------------
   -- Control and status registers.
@@ -558,6 +517,9 @@ begin
   tx_enable_sideband                    <= ctrl_reg(0)(3);
   rx_fifo_reset                         <= ctrl_reg(0)(4);
   tx_fifo_reset                         <= ctrl_reg(0)(5);
+  rx_fifo_bypass                        <= ctrl_reg(0)(6);
+  rx_fifo_overflow_clr                  <= ctrl_reg(0)(7);
+  tx_fifo_underflow_clr                 <= ctrl_reg(0)(8);
   axis_master_tdest_hold                <= ctrl_reg(0)(31 downto 29);
   -- Bank 1 (USRP Mode)
   usrp_mode_ctrl                        <= ctrl_reg(1)(7 downto 0);
@@ -592,6 +554,11 @@ begin
   status_reg(0)(1)                      <= tx_enable;
   status_reg(0)(2)                      <= rx_enable_sideband;
   status_reg(0)(3)                      <= tx_enable_sideband;
+  status_reg(0)(4)                      <= rx_fifo_reset;
+  status_reg(0)(5)                      <= tx_fifo_reset;
+  status_reg(0)(6)                      <= rx_fifo_bypass;
+  status_reg(0)(7)                      <= rx_fifo_overflow_clr;
+  status_reg(0)(8)                      <= tx_fifo_underflow_clr;
   status_reg(0)(31 downto 29)           <= axis_master_tdest_safe;
   -- Bank 1 (USRP Mode Readback)
   status_reg(1)(7 downto 0)             <= usrp_mode_ctrl;

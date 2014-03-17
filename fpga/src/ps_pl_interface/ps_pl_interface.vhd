@@ -558,7 +558,8 @@ architecture RTL of ps_pl_interface is
 
   signal rst_global_n               : std_logic;
   signal rst_global                 : std_logic;
-  signal rst_cmd_fifo               : std_logic;
+  signal rst_mm2s_cmd_fifo          : std_logic;
+  signal rst_s2mm_cmd_fifo          : std_logic;
   signal rst_sts_fifo               : std_logic;
   signal mm2s_cmd_fifo_loop         : std_logic_vector(7 downto 0);
   signal s2mm_cmd_fifo_loop         : std_logic_vector(7 downto 0);
@@ -568,11 +569,13 @@ architecture RTL of ps_pl_interface is
   signal irq_axis_master_en         : std_logic_vector(7 downto 0);
   signal irq_axis_slave_en          : std_logic_vector(7 downto 0);
   signal mm2s_cmd_addr              : std_logic_vector(31 downto 0);
+  signal mm2s_cmd_seq_num           : std_logic_vector(11 downto 0);
   signal mm2s_cmd_size              : std_logic_vector(22 downto 0);
   signal mm2s_cmd_cache             : std_logic_vector(3 downto 0);
   signal mm2s_cmd_tdest             : std_logic_vector(2 downto 0);
   signal mm2s_cmd_en                : std_logic;
   signal s2mm_cmd_addr              : std_logic_vector(31 downto 0);
+  signal s2mm_cmd_seq_num           : std_logic_vector(11 downto 0);
   signal s2mm_cmd_size              : std_logic_vector(22 downto 0);
   signal s2mm_cmd_cache             : std_logic_vector(3 downto 0);
   signal s2mm_cmd_tid               : std_logic_vector(2 downto 0);
@@ -631,6 +634,12 @@ architecture RTL of ps_pl_interface is
   signal mm2s_tdest                 : integer range 0 to 7;
   signal mm2s_xfer_in_progress      : std_logic;
   signal s2mm_xfer_in_progress      : std_logic;
+  signal mm2s_xfer_en               : std_logic;
+  signal s2mm_xfer_en               : std_logic;
+  signal s2mm_xfer_cnt              : integer;
+  signal clear_s2mm_xfer_cnt        : std_logic;
+  signal mm2s_xfer_cnt              : integer;
+  signal clear_mm2s_xfer_cnt        : std_logic;
 
   signal irq_long_cnt               : integer range 0 to 15;
   signal irq_queue_cnt              : integer range 0 to 31;
@@ -640,6 +649,12 @@ architecture RTL of ps_pl_interface is
   signal axis_slave_0_irq           : std_logic;
 
   signal debug_counter              : integer;
+
+  attribute keep                        : string;
+  attribute keep of mm2s_err            : signal is "true";
+  attribute keep of s2mm_err            : signal is "true";
+  attribute keep of mm2s_rd_xfer_cmplt  : signal is "true";
+  attribute keep of s2mm_wr_xfer_cmplt  : signal is "true";
 
 begin
 
@@ -1053,7 +1068,7 @@ begin
     mm2s_cmd_fifo_72x64 : fifo_72x64
       port map (
         clk                         => clk,
-        rst                         => rst_cmd_fifo,
+        rst                         => rst_mm2s_cmd_fifo,
         din                         => mm2s_cmd_fifo_din(i),
         wr_en                       => mm2s_cmd_fifo_wr_en(i),
         rd_en                       => mm2s_cmd_fifo_rd_en(i),
@@ -1064,7 +1079,7 @@ begin
     s2mm_cmd_fifo_72x64 : fifo_72x64
       port map (
         clk                         => clk,
-        rst                         => rst_cmd_fifo,
+        rst                         => rst_s2mm_cmd_fifo,
         din                         => s2mm_cmd_fifo_din(i),
         wr_en                       => s2mm_cmd_fifo_wr_en(i),
         rd_en                       => s2mm_cmd_fifo_rd_en(i),
@@ -1128,7 +1143,7 @@ begin
       if rising_edge(clk) then
         -- Check each command FIFO. If not empty, the Datamover is ready, and a transfer is currently not in
         -- process, execute a new transfer.
-        if (mm2s_cmd_fifo_empty(mm2s_tdest) = '0' AND axis_mm2s_cmd_tready = '1' AND mm2s_xfer_in_progress = '0') then
+        if (mm2s_cmd_fifo_empty(mm2s_tdest) = '0' AND axis_mm2s_cmd_tready = '1' AND mm2s_xfer_in_progress = '0' AND mm2s_xfer_en = '1') then
           mm2s_cmd_fifo_rd_en(mm2s_tdest)   <= '1';
           axis_mm2s_cmd_tvalid              <= '1';
           axis_mm2s_cmd_tdata               <= mm2s_cmd_fifo_dout(mm2s_tdest);
@@ -1147,7 +1162,7 @@ begin
           end if;
         end if;
         -- Clear transfer in progress register when the write is complete
-        if (mm2s_rd_xfer_cmplt = '1') then
+        if (axis_mm2s_sts_tvalid = '1') then
           mm2s_xfer_in_progress             <= '0';
         end if;
       end if;
@@ -1166,7 +1181,7 @@ begin
         -- Wait until the Datamover is ready, the command FIFO is not empty, the AXI-Stream master
         -- has valid data, and no other transfers are in progress.
         if (axis_s2mm_cmd_tready = '1' AND s2mm_cmd_fifo_empty(to_integer(unsigned(axis_s2mm_tid))) = '0' AND
-            axis_s2mm_tvalid = '1'     AND s2mm_xfer_in_progress = '0') then
+            axis_s2mm_tvalid = '1'     AND s2mm_xfer_in_progress = '0'  AND s2mm_xfer_en = '1') then
           s2mm_cmd_fifo_rd_en(to_integer(unsigned(axis_s2mm_tid)))  <= '1';
           axis_s2mm_cmd_tvalid                  <= '1';
           axis_s2mm_cmd_tdata                   <= s2mm_cmd_fifo_dout(to_integer(unsigned(axis_s2mm_tid)));
@@ -1175,7 +1190,7 @@ begin
           s2mm_cmd_fifo_rd_en                   <= (others=>'0');
           axis_s2mm_cmd_tvalid                  <= '0';
         end if;
-        if (s2mm_wr_xfer_cmplt = '1') then
+        if (axis_s2mm_sts_tvalid = '1') then
           s2mm_xfer_in_progress                 <= '0';
         end if;
       end if;
@@ -1185,7 +1200,7 @@ begin
   -------------------------------------------------------------------------------
   -- FIFOs for the Datamover MM2S and S2MM Status interfaces
   -- Note: The sts_tready signals are always asserted on the Datamover as
-  --       deasserting the signal can causes it to stall. This means that these
+  --       deasserting the signal can cause it to stall. This means that these
   --       FIFOs may overflow if not read, but ultimately that is not a serious
   --       issue (especially if sts_fifo_auto_read is enabled).
   -------------------------------------------------------------------------------
@@ -1220,6 +1235,39 @@ begin
   -- overflow)
   s2mm_sts_fifo_rd_en             <= '1' when (status_0_addr = x"07" AND status_0_stb = '1') OR
                                               (sts_fifo_auto_read = '1' AND s2mm_sts_fifo_full = '1') else '0';
+
+  -- Count the number of transfers per plblock in each direction
+  proc_xfer_counters : process(clk,rst_global_n)
+  begin
+    if (rst_global_n = '0') then
+      s2mm_xfer_cnt               <= 0;
+      mm2s_xfer_cnt               <= 0;
+    else
+      if rising_edge(clk) then
+        for i in 0 to 7 loop
+          if (clear_s2mm_xfer_cnt = '1' AND status_0_addr = x"00" AND status_0_stb = '1') then
+            -- Xfer occured when we were commanded to clear the count
+            if (axis_s2mm_sts_tvalid = '1') then
+              s2mm_xfer_cnt       <= 1;
+            else
+              s2mm_xfer_cnt       <= 0;
+            end if;
+          elsif (axis_s2mm_sts_tvalid = '1') then
+            s2mm_xfer_cnt         <= s2mm_xfer_cnt + 1;
+          end if;
+          if (clear_mm2s_xfer_cnt = '1' AND status_0_addr = x"00" AND status_0_stb = '1') then
+            if (axis_mm2s_sts_tvalid = '1') then
+              mm2s_xfer_cnt       <= 1;
+            else
+              mm2s_xfer_cnt       <= 0;
+            end if;
+          elsif (axis_s2mm_sts_tvalid = '1') then
+            mm2s_xfer_cnt         <= mm2s_xfer_cnt + 1;
+          end if;
+        end loop;
+      end if;
+    end if;
+  end process;
 
   -------------------------------------------------------------------------------
   -- Control and status registers.
@@ -1296,11 +1344,16 @@ begin
   end process;
 
   -- Control Registers Bank 0 (General)
-  rst_cmd_fifo                          <= ctrl_0_reg(0)(0) OR rst_global;
-  rst_sts_fifo                          <= ctrl_0_reg(0)(1) OR rst_global;
-  mm2s_cmd_fifo_loop                    <= ctrl_0_reg(0)(9 downto 2);   -- Re-write command fifo output back to input
-  s2mm_cmd_fifo_loop                    <= ctrl_0_reg(0)(17 downto 10); -- Re-write command fifo output back to input
-  sts_fifo_auto_read                    <= ctrl_0_reg(0)(18);  -- Automatically read FIFO if full to prevent overflow
+  mm2s_xfer_en                          <= ctrl_0_reg(0)(0);
+  s2mm_xfer_en                          <= ctrl_0_reg(0)(1);
+  rst_mm2s_cmd_fifo                     <= ctrl_0_reg(0)(2) OR rst_global;
+  rst_s2mm_cmd_fifo                     <= ctrl_0_reg(0)(3) OR rst_global;
+  mm2s_cmd_fifo_loop                    <= ctrl_0_reg(0)(11 downto 4);    -- Re-write command fifo output back to input
+  s2mm_cmd_fifo_loop                    <= ctrl_0_reg(0)(19 downto 12);   -- Re-write command fifo output back to input
+  sts_fifo_auto_read                    <= ctrl_0_reg(0)(20);  -- Automatically read FIFO if full to prevent overflow
+  rst_sts_fifo                          <= ctrl_0_reg(0)(21) OR rst_global;
+  clear_mm2s_xfer_cnt                   <= ctrl_0_reg(0)(22);
+  clear_s2mm_xfer_cnt                   <= ctrl_0_reg(0)(23);
   -- Control Registers Bank 1 (Accelerator Interrupts)
   irq_s2mm_en                           <= ctrl_0_reg(1)(0);
   irq_mm2s_en                           <= ctrl_0_reg(1)(1);
@@ -1320,11 +1373,18 @@ begin
   s2mm_cmd_en                           <= ctrl_0_reg(5)(31);
 
   -- Status Registers Bank 0 (General Readback)
-  status_0_reg(0)(0)                    <= rst_cmd_fifo;
-  status_0_reg(0)(1)                    <= rst_sts_fifo;
-  status_0_reg(0)(9 downto 2)           <= mm2s_cmd_fifo_loop;
-  status_0_reg(0)(17 downto 10)         <= s2mm_cmd_fifo_loop;
-  status_0_reg(0)(18)                   <= sts_fifo_auto_read;
+  status_0_reg(0)(0)                    <= mm2s_xfer_en;
+  status_0_reg(0)(1)                    <= s2mm_xfer_en;
+  status_0_reg(0)(2)                    <= rst_mm2s_cmd_fifo;
+  status_0_reg(0)(3)                    <= rst_s2mm_cmd_fifo;
+  status_0_reg(0)(11 downto 4)          <= mm2s_cmd_fifo_loop;
+  status_0_reg(0)(19 downto 12)         <= s2mm_cmd_fifo_loop;
+  status_0_reg(0)(20)                   <= sts_fifo_auto_read;
+  status_0_reg(0)(21)                   <= rst_sts_fifo;
+  status_0_reg(0)(22)                   <= clear_mm2s_xfer_cnt;
+  status_0_reg(0)(23)                   <= clear_s2mm_xfer_cnt;
+  status_0_reg(0)(24)                   <= mm2s_xfer_in_progress;
+  status_0_reg(0)(25)                   <= s2mm_xfer_in_progress;
   -- Status Registers Bank 1 (Interrupts Readback)
   status_0_reg(1)(0)                    <= irq_s2mm_en;
   status_0_reg(1)(1)                    <= irq_mm2s_en;
@@ -1356,9 +1416,13 @@ begin
   status_0_reg(9)(15 downto 8)          <= mm2s_cmd_fifo_full;
   status_0_reg(9)(23 downto 16)         <= s2mm_cmd_fifo_empty;
   status_0_reg(9)(31 downto 24)         <= s2mm_cmd_fifo_full;
-  -- Status Registers Bank 10 (Test Word)
-  status_0_reg(10)                      <= x"CA11AB1E";
-  -- Status Registers Bank 11 (Debug Counter)
-  status_0_reg(11)                      <= std_logic_vector(to_unsigned(debug_counter,32));
+  -- Status Register Bank 11 (MM2S Xfer count)
+  status_0_reg(10)                      <= std_logic_vector(to_unsigned(mm2s_xfer_cnt,32));
+  -- Status Register Bank 12 (S2MM Xfer count)
+  status_0_reg(11)                      <= std_logic_vector(to_unsigned(s2mm_xfer_cnt,32));
+  -- Status Registers Bank 20 (Test Word)
+  status_0_reg(12)                      <= x"CA11AB1E";
+  -- Status Registers Bank 21 (Debug Counter)
+  status_0_reg(13)                      <= std_logic_vector(to_unsigned(debug_counter,32));
 
 end architecture;

@@ -1,7 +1,7 @@
 TARGET = record-samples
-LIBS = -ludev
+LIBS = -lcrash -lm
 CC = gcc
-CFLAGS = -O0 -Wall
+CFLAGS = -Wall
 
 .PHONY: default all clean
 
@@ -20,5 +20,5 @@ $(TARGET): $(OBJECTS)
 	$(CC) $(OBJECTS) -Wall $(LIBS) -o $@
 
 clean:
-	-rm -f *.o
-	-rm -f $(TARGET)
+	rm -f *.o
+	rm -f $(TARGET)

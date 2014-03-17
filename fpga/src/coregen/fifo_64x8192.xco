@@ -1,7 +1,7 @@
 ##############################################################
 #
-# Xilinx Core Generator version 14.6
-# Date: Tue Jan 21 19:34:50 2014
+# Xilinx Core Generator version 14.7
+# Date: Sat Mar 15 20:52:49 2014
 #
 ##############################################################
 #
@@ -21,7 +21,7 @@ SET addpads = false
 SET asysymbol = true
 SET busformat = BusFormatAngleBracketNotRipped
 SET createndf = false
-SET designentry = Verilog
+SET designentry = VHDL
 SET device = xc7z045
 SET devicefamily = zynq
 SET flowvendor = Foundation_ISE
@@ -32,8 +32,8 @@ SET package = ffg900
 SET removerpms = false
 SET simulationfiles = Behavioral
 SET speedgrade = -2
-SET verilogsim = true
-SET vhdlsim = false
+SET verilogsim = false
+SET vhdlsim = true
 # END Project Options
 # BEGIN Select
 SELECT FIFO_Generator xilinx.com:ip:fifo_generator:9.3
@@ -51,9 +51,9 @@ CSET axis_type=FIFO
 CSET buser_width=1
 CSET clock_enable_type=Slave_Interface_Clock_Enable
 CSET clock_type_axi=Common_Clock
-CSET component_name=fifo_buffer_64x16
+CSET component_name=fifo_64x8192
 CSET data_count=false
-CSET data_count_width=5
+CSET data_count_width=13
 CSET disable_timing_violations=false
 CSET disable_timing_violations_axi=false
 CSET dout_reset_value=0
@@ -85,7 +85,7 @@ CSET enable_ecc_wdch=false
 CSET enable_ecc_wrch=false
 CSET enable_read_channel=false
 CSET enable_read_pointer_increment_by2=false
-CSET enable_reset_synchronization=true
+CSET enable_reset_synchronization=false
 CSET enable_ruser=false
 CSET enable_tdata=false
 CSET enable_tdest=false
@@ -103,22 +103,22 @@ CSET fifo_application_type_rdch=Data_FIFO
 CSET fifo_application_type_wach=Data_FIFO
 CSET fifo_application_type_wdch=Data_FIFO
 CSET fifo_application_type_wrch=Data_FIFO
-CSET fifo_implementation=Common_Clock_Distributed_RAM
+CSET fifo_implementation=Independent_Clocks_Block_RAM
 CSET fifo_implementation_axis=Common_Clock_Block_RAM
 CSET fifo_implementation_rach=Common_Clock_Block_RAM
 CSET fifo_implementation_rdch=Common_Clock_Block_RAM
 CSET fifo_implementation_wach=Common_Clock_Block_RAM
 CSET fifo_implementation_wdch=Common_Clock_Block_RAM
 CSET fifo_implementation_wrch=Common_Clock_Block_RAM
-CSET full_flags_reset_value=0
-CSET full_threshold_assert_value=15
+CSET full_flags_reset_value=1
+CSET full_threshold_assert_value=8191
 CSET full_threshold_assert_value_axis=1023
 CSET full_threshold_assert_value_rach=1023
 CSET full_threshold_assert_value_rdch=1023
 CSET full_threshold_assert_value_wach=1023
 CSET full_threshold_assert_value_wdch=1023
 CSET full_threshold_assert_value_wrch=1023
-CSET full_threshold_negate_value=14
+CSET full_threshold_negate_value=8190
 CSET id_width=4
 CSET inject_dbit_error=false
 CSET inject_dbit_error_axis=false
@@ -135,7 +135,7 @@ CSET inject_sbit_error_wach=false
 CSET inject_sbit_error_wdch=false
 CSET inject_sbit_error_wrch=false
 CSET input_data_width=64
-CSET input_depth=16
+CSET input_depth=8192
 CSET input_depth_axis=1024
 CSET input_depth_rach=16
 CSET input_depth_rdch=1024
@@ -144,7 +144,7 @@ CSET input_depth_wdch=1024
 CSET input_depth_wrch=16
 CSET interface_type=Native
 CSET output_data_width=64
-CSET output_depth=16
+CSET output_depth=8192
 CSET overflow_flag=true
 CSET overflow_flag_axi=false
 CSET overflow_sense=Active_High
@@ -168,7 +168,7 @@ CSET rach_type=FIFO
 CSET rdch_type=FIFO
 CSET read_clock_frequency=1
 CSET read_data_count=false
-CSET read_data_count_width=5
+CSET read_data_count_width=13
 CSET register_slice_mode_axis=Fully_Registered
 CSET register_slice_mode_rach=Fully_Registered
 CSET register_slice_mode_rdch=Fully_Registered
@@ -176,7 +176,7 @@ CSET register_slice_mode_wach=Fully_Registered
 CSET register_slice_mode_wdch=Fully_Registered
 CSET register_slice_mode_wrch=Fully_Registered
 CSET reset_pin=true
-CSET reset_type=Synchronous_Reset
+CSET reset_type=Asynchronous_Reset
 CSET ruser_width=1
 CSET synchronization_stages=2
 CSET synchronization_stages_axi=2
@@ -193,7 +193,7 @@ CSET underflow_sense_axi=Active_High
 CSET use_clock_enable=false
 CSET use_dout_reset=true
 CSET use_embedded_registers=false
-CSET use_extra_logic=true
+CSET use_extra_logic=false
 CSET valid_flag=false
 CSET valid_sense=Active_High
 CSET wach_type=FIFO
@@ -203,11 +203,11 @@ CSET write_acknowledge_flag=false
 CSET write_acknowledge_sense=Active_High
 CSET write_clock_frequency=1
 CSET write_data_count=false
-CSET write_data_count_width=5
+CSET write_data_count_width=13
 CSET wuser_width=1
 # END Parameters
 # BEGIN Extra information
 MISC pkg_timestamp=2012-11-19T12:39:56Z
 # END Extra information
 GENERATE
-# CRC: 13b56a71
+# CRC: 591e50a2

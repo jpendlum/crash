@@ -20,6 +20,7 @@
 --  Description: Specturm sensing by implementing a FFT, magnitude calculation,
 --               and threshold detection. The entire pipeline is single
 --               precision floating point and based on Xilinx IP.
+--               Maximum FFT size of 4096.
 -------------------------------------------------------------------------------
 library ieee;
 use ieee.std_logic_1164.all;
@@ -562,7 +563,7 @@ begin
     -- output_mode: 00 - Normal FFT frequency output
     --              01 - Threshold result, Index, & Magnitude
     --           10,11 - Discard output. Useful for running the FFT when we only want to trigger on
-    --                   the threshold being exceeded without having to send the FFT output anywhere.
+    --                   the threshold being exceeded without having to send the FFT output somewhere.
   output_mode                           <= ctrl_reg(1)(9 downto 8);
   enable_threshold_irq                  <= ctrl_reg(1)(10);
   enable_thresh_sideband                <= ctrl_reg(1)(11);

@@ -1,5 +1,5 @@
-TARGET = arm-spectrum-sensing
-LIBS = -lcrash -lfftw3f -lm
+TARGET = arm-spectrum-decision-no-thresholding
+LIBS = -lcrash -lm
 CC = gcc
 CFLAGS = -Wall -mfpu=neon
 

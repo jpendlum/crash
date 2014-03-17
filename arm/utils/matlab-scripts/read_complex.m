@@ -16,7 +16,7 @@
 %-
 %-
 fp = fopen('data.txt','r');
-A = fread(fp,8192,'float');
+A = fread(fp,'float');
 fclose(fp);
 I = A(1:2:end);
 Q = A(2:2:end);

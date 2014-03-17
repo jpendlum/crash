@@ -1,7 +1,7 @@
-TARGET = arm-spectrum-sensing
-LIBS = -lcrash -lfftw3f -lm
+TARGET = transmit-samples
+LIBS = -lcrash -lm
 CC = gcc
-CFLAGS = -Wall -mfpu=neon
+CFLAGS = -Wall
 
 .PHONY: default all clean
 
@@ -20,5 +20,5 @@ $(TARGET): $(OBJECTS)
 	$(CC) $(OBJECTS) -Wall $(LIBS) -o $@
 
 clean:
-	-rm -f *.o
-	-rm -f $(TARGET)
+	rm -f *.o
+	rm -f $(TARGET)

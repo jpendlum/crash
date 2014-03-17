@@ -14,10 +14,13 @@
 **
 **
 **
-**  File:         fpga-spectrum-sense.c
+**  File:         arm-spectrum-decision.c
 **  Author(s):    Jonathon Pendlum (jon.pendlum@gmail.com)
-**  Description:  Offload spectrum sensing & spectrum decision to the FPGA.
-**                Spectrum decision is simple: If all FFT bins are behold
+**  Description:  Offload spectrum sensing to the FPGA, execute spectrum decision
+**                on the processor. This version does not do thresholding on the ARM.
+**                Instead it uses the thresholding result from the FPGA.
+**
+**                Spectrum decision is simple: If all FFT bins are below
 **                the threshold -> transmit.
 **
 **                Lab setup for this program
@@ -30,6 +33,7 @@
 **                  to measure the turn around time.
 **                  Make sure to check the USRP input / output power levels to not
 **
+**
 ******************************************************************************/
 #include <stdio.h>
 #include <stdlib.h>
@@ -38,6 +42,7 @@
 #include <signal.h>
 #include <time.h>
 #include <math.h>
+#include <sched.h>
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -48,6 +53,7 @@
 #include <getopt.h>
 #include <crash-kmod.h>
 #include <libcrash.h>
+#include <arm_neon.h>
 
 // Global variable used to kill final loop
 int loop_prog = 0;
@@ -59,16 +65,33 @@ void ctrl_c(int dummy)
 }
 
 int main (int argc, char **argv) {
-  int c;
-  int i;
+  int c = 0;
+  int i = 0;
+  int j = 0;
+  uint temp_int = 0;
+  uint num_loops = 0;
   bool interrupt_flag = false;
   uint number_samples = 0;
   uint decim_rate = 0;
   uint fft_size = 0;
   float threshold = 0.0;
-  uint temp_int;
-  float temp_float;
   double gain = 0.0;
+  float* fft_mag;
+  uint32_t* fft_data;
+  int threshold_exceeded = 0;
+  float threshold_exceeded_mag = 0.0;
+  int threshold_exceeded_index = 0;
+  uint32_t start_thresholding;
+  uint32_t stop_thresholding;
+  uint32_t start_overhead;
+  uint32_t stop_overhead;
+  uint32_t start_dma;
+  uint32_t stop_dma;
+  float dma_time[30];
+  float thresholding_time[30];
+  uint32x4_t integers;
+  uint32x4_t thresholds;
+  uint32x4_t compares;
   struct crash_plblock *spec_sense;
   struct crash_plblock *usrp_intf_tx;
 
@@ -79,7 +102,6 @@ int main (int argc, char **argv) {
          We distinguish them by their indices. */
       {"interrupt",   no_argument,       0, 'i'},
       {"loop prog",   no_argument,       0, 'l'},
-      {"samples",     required_argument, 0, 'n'},
       {"decim",       required_argument, 0, 'd'},
       {"fft size",    required_argument, 0, 'k'},
       {"threshold",   required_argument, 0, 't'},
@@ -157,6 +179,14 @@ int main (int argc, char **argv) {
   // Set Ctrl-C handler
   signal(SIGINT, ctrl_c);
 
+  // Set this process to be real time
+  //struct sched_param param;
+  //param.sched_priority = 99;
+  //if (sched_setscheduler(0, SCHED_FIFO, & param) != 0) {
+  //    perror("sched_setscheduler");
+  //    exit(EXIT_FAILURE);
+  //}
+
 
   usrp_intf_tx = crash_open(USRP_INTF_PLBLOCK_ID,WRITE);
   if (usrp_intf_tx == 0) {
@@ -170,6 +200,12 @@ int main (int argc, char **argv) {
     printf("ERROR: Failed to allocate spec_sense plblock\n");
     return -1;
   }
+
+  fft_mag = (float *)spec_sense->dma_buff;
+  fft_data = (uint32_t *)spec_sense->dma_buff;
+  start_overhead = crash_read_reg(usrp_intf_tx->regs,DMA_DEBUG_CNT);
+  stop_overhead = crash_read_reg(usrp_intf_tx->regs,DMA_DEBUG_CNT);
+  printf("Overhead (us): %f\n",(1e6/150e6)*(stop_overhead - start_overhead));
 
   do {
     // Global Reset to get us to a clean slate
@@ -241,7 +277,7 @@ int main (int argc, char **argv) {
     crash_set_bit(usrp_intf_tx->regs, USRP_TX_HB_BYPASS);                         // Bypass HB Filter
     crash_write_reg(usrp_intf_tx->regs, USRP_TX_GAIN, 1);                         // Set gain = 1
 
-    // Create a CW signal
+    // Create a CW signal to transmit
     float *tx_sample = (float*)(usrp_intf_tx->dma_buff);
     for (i = 0; i < 4095; i++) {
       tx_sample[2*i+1] = 0;
@@ -254,56 +290,150 @@ int main (int argc, char **argv) {
     crash_write(usrp_intf_tx, USRP_INTF_PLBLOCK_ID, 4096);
 
     // Setup Spectrum Sense
-    crash_write_reg(spec_sense->regs,SPEC_SENSE_OUTPUT_MODE,3);                   // Throw away FFT output
+    crash_write_reg(spec_sense->regs,SPEC_SENSE_AXIS_MASTER_TDEST,DMA_PLBLOCK_ID);  // Set Spectrum Sense block output destimation
+    crash_write_reg(spec_sense->regs,SPEC_SENSE_OUTPUT_MODE,1);                   // FFT Magnitude Data
     crash_write_reg(spec_sense->regs,SPEC_SENSE_AXIS_CONFIG_TDATA,fft_size);      // FFT Size
     crash_set_bit(spec_sense->regs,SPEC_SENSE_AXIS_CONFIG_TVALID);                // FFT Size Enable
     crash_set_bit(spec_sense->regs,SPEC_SENSE_ENABLE_FFT);                        // Enable FFT
     crash_clear_bit(spec_sense->regs,SPEC_SENSE_AXIS_CONFIG_TVALID);
-    //crash_set_bit(spec_sense->regs,SPEC_SENSE_ENABLE_THRESH_SIDEBAND);            // Enable sideband threshold exceeded output (to trigger TX)
-    crash_set_bit(spec_sense->regs,SPEC_SENSE_ENABLE_NOT_THRESH_SIDEBAND);        // Enable sideband threshold NOT exceeded output (to trigger TX)
     memcpy(&temp_int,&threshold,sizeof(float));                                   // Copy float value to an int without a cast
     crash_write_reg(spec_sense->regs,SPEC_SENSE_THRESHOLD,temp_int);              // Threshold level in single precision floating point
 
-
     crash_set_bit(usrp_intf_tx->regs,USRP_RX_ENABLE);                             // Enable RX
 
-    i = 0;
-    while(crash_get_bit(spec_sense->regs,SPEC_SENSE_THRESHOLD_EXCEEDED) == 0) {
-      sleep(1);
-      if (i > 10) {
-        printf("TIMEOUT\n");
+    // First, loop until threshold is exceeded
+    j = 0;
+    while (threshold_exceeded == 0) {
+      crash_read(spec_sense, SPEC_SENSE_PLBLOCK_ID, number_samples);
+      // Lower 32-bits of 64-bit AXI xfer is FFT magnitude data. Upper 32-bit are the FFT bin index
+      // and threshold exceeded flag (bit 31). So, we use 2*i to index this buffer.
+      for (i = 0; i < number_samples; i++) {
+        // Bit 31 is set when threshold is exceeded, but the lower bits contain the FFT bin number.
+        // So if the value is >= than 0x80000000, we atleast know that the bit 31 is set.
+        if (fft_data[2*i+1] >= 0x80000000) {
+          threshold_exceeded = 1;
+          // Save threshold data
+          threshold_exceeded_mag = fft_mag[2*i];
+          threshold_exceeded_index = i;
+          break;
+        }
+      }
+      if (j > 10) {
+        printf("TIMEOUT: Threshold never exceeded\n");
         goto cleanup;
       }
-      i++;
+      j++;
+      sleep(1);
     }
 
-    crash_set_bit(spec_sense->regs,SPEC_SENSE_CLEAR_THRESHOLD_LATCHED);           // Enable clear threshold latched
-    crash_set_bit(usrp_intf_tx->regs,USRP_TX_ENABLE_SIDEBAND);                    // Enable TX Sideband
+    // Set threshold for NEON instruction
+    thresholds[0] = 0x80000000;
+    thresholds[1] = 0x80000000;
+    thresholds[2] = 0x80000000;
+    thresholds[3] = 0x80000000;
 
-    while(crash_get_bit(spec_sense->regs,SPEC_SENSE_THRESHOLD_EXCEEDED) == 1);
+    // Second, loop until threshold is not exceeded
+    while (threshold_exceeded == 1) {
+      threshold_exceeded = 0;
+      crash_read(spec_sense, SPEC_SENSE_PLBLOCK_ID, number_samples);
+      for (i = 0; i < number_samples/4; i++) {
+        // NEON GCC Intrinsic to do a 4x unsigned integer greater-than or equal to compare
+        // We use the number explained in the loop above here for the comparison
+        integers[0] = fft_data[8*i+1];
+        integers[1] = fft_data[8*i+3];
+        integers[2] = fft_data[8*i+5];
+        integers[3] = fft_data[8*i+7];
+        compares = vcgeq_u32(integers,thresholds);
+        if (compares[0] == -1 || compares[1] == -1 || compares[2] == -1 || compares[3] == -1) {
+          // Do not break loop
+          threshold_exceeded = 1;
+          break;
+        }
+      }
+      if (threshold_exceeded == 0) {
+        // Enable TX
+        crash_set_bit(usrp_intf_tx->regs,USRP_TX_ENABLE);
+      }
+    }
+
+    // Calculate how long the DMA and the thresholding took by using a counter in the FPGA
+    // running at 150 MHz.
+    start_dma = crash_read_reg(usrp_intf_tx->regs,DMA_DEBUG_CNT);
+    crash_read(spec_sense, SPEC_SENSE_PLBLOCK_ID, number_samples);
+    stop_dma = crash_read_reg(usrp_intf_tx->regs,DMA_DEBUG_CNT);
+    // Set threshold for NEON instruction to something impossible
+    thresholds[0] = 0x88000000;
+    thresholds[1] = 0x88000000;
+    thresholds[2] = 0x88000000;
+    thresholds[3] = 0x88000000;
+    start_thresholding = crash_read_reg(usrp_intf_tx->regs,DMA_DEBUG_CNT);
+    for (i = 0; i < number_samples/4; i++) {
+      integers[0] = fft_data[8*i+1];
+      integers[1] = fft_data[8*i+3];
+      integers[2] = fft_data[8*i+5];
+      integers[3] = fft_data[8*i+7];
+      compares = vcgeq_u32(integers,thresholds);
+      if (compares[0] == -1 || compares[1] == -1 || compares[2] == -1 || compares[3] == -1) {
+        printf("This shouldn't happen\n");
+      }
+    }
+    stop_thresholding = crash_read_reg(usrp_intf_tx->regs,DMA_DEBUG_CNT);
 
     // Print threshold information
-    temp_int = crash_read_reg(spec_sense->regs,SPEC_SENSE_THRESHOLD);
-    memcpy(&temp_float,&temp_int,sizeof(int));
-    printf("Threshold:\t\t\t%f\n",temp_float);
-    printf("Threshold Exceeded:\t\t%d\n",crash_get_bit(spec_sense->regs,SPEC_SENSE_THRESHOLD_EXCEEDED));
-    printf("Threshold Exceeded Index:\t%d\n",crash_read_reg(spec_sense->regs,SPEC_SENSE_THRESHOLD_EXCEEDED_INDEX));
-    temp_int = crash_read_reg(spec_sense->regs,SPEC_SENSE_THRESHOLD_EXCEEDED_MAG);
-    memcpy(&temp_float,&temp_int,sizeof(int));
-    printf("Threshold Exceeded Mag:\t\t%f\n",temp_float);
+    printf("Threshold:\t\t\t%f\n",threshold);
+    printf("Threshold Exceeded Index:\t%d\n",threshold_exceeded_index);
+    printf("Threshold Exceeded Mag:\t\t%f\n",threshold_exceeded_mag);
+    printf("DMA Time (us): %f\n",(1e6/150e6)*(stop_dma - start_dma));
+    printf("Thresholding Time (us): %f\n",(1e6/150e6)*(stop_thresholding - start_thresholding));
+
+    // Keep track of times so we can report an average at the end
+    if (num_loops < 30) {
+      dma_time[num_loops] = (1e6/150e6)*(stop_dma - start_dma);
+      thresholding_time[num_loops] = (1e6/150e6)*(stop_thresholding - start_thresholding);
+    }
+    num_loops++;
 
     if (loop_prog == 1) {
       printf("Ctrl-C to end program after this loop\n");
     }
 
-  cleanup:
-    crash_set_bit(spec_sense->regs,SPEC_SENSE_CLEAR_THRESHOLD_LATCHED);           // Enable clear threshold latched
+    // Force printf to flush since. We are at a real-time priority, so it cannot unless we force it.
+    //fflush(stdout);
+    //if (nanosleep(&ask_sleep,&act_sleep) < 0) {
+    //    perror("nanosleep");
+    //    exit(EXIT_FAILURE);
+    //}
+
+cleanup:
     crash_clear_bit(usrp_intf_tx->regs,USRP_RX_ENABLE);                           // Disable RX
     crash_clear_bit(spec_sense->regs,SPEC_SENSE_ENABLE_FFT);                      // Disable FFT
-    crash_clear_bit(usrp_intf_tx->regs,USRP_TX_ENABLE_SIDEBAND);                  // Disable TX Sideband
     crash_clear_bit(usrp_intf_tx->regs,USRP_TX_ENABLE);                           // Disable TX
+    threshold_exceeded = 0;
+    threshold_exceeded_mag = 0.0;
+    threshold_exceeded_index = 0;
     sleep(1);
   } while (loop_prog == 1);
+
+  float dma_time_avg = 0.0;
+  float thresholding_time_avg = 0.0;
+  if (num_loops > 30) {
+    for (i = 0; i < 30; i++) {
+      dma_time_avg += dma_time[i];
+      thresholding_time_avg += thresholding_time[i];
+    }
+    dma_time_avg = dma_time_avg/30;
+    thresholding_time_avg = thresholding_time_avg/30;
+  } else {
+    for (i = 0; i < num_loops; i++) {
+      dma_time_avg += dma_time[i];
+      thresholding_time_avg += thresholding_time[i];
+    }
+    dma_time_avg = dma_time_avg/num_loops;
+    thresholding_time_avg = thresholding_time_avg/num_loops;
+  }
+  printf("Number of loops: %d\n",num_loops);
+  printf("Average DMA time (us): %f\n",dma_time_avg);
+  printf("Average Thresholding time (us): %f\n",thresholding_time_avg);
 
   crash_close(usrp_intf_tx);
   crash_close(spec_sense);

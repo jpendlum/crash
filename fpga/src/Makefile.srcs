@@ -27,13 +27,14 @@ coregen/cic_decimator.xco \
 coregen/cic_interpolator.xco \
 coregen/fft_axis.xco \
 coregen/fifo_8x64.xco \
-coregen/fifo_32x16.xco \
 coregen/fifo_72x64.xco \
-coregen/fifo_64x4096.xco \
+coregen/fifo_64x8192.xco \
+coregen/fifo_14to28.xco \
+coregen/fifo_32to16.xco \
 coregen/fir_halfband_decimator.xco \
 coregen/fir_halfband_interpolator.xco \
 coregen/fix1_31_to_float32.xco \
-coregen/float32_to_fix1_31.xco \
+coregen/float32_to_fix1_19.xco \
 coregen/gteq_floating_point.xco \
 coregen/mmcm_ddr_to_sdr.xco \
 coregen/mult_rx_gain_adjust.xco \

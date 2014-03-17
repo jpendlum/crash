@@ -971,36 +971,15 @@ begin
       threshold_exceeded                        => threshold_exceeded,
       threshold_exceeded_stb                    => threshold_exceeded_stb);
 
-  -- Accelerator 3
-  inst_bpsk_mod : bpsk_mod
-    port map (
-      clk                                       => clk,
-      rst_n                                     => rst_glb_n,
-      status_addr                               => status_3_addr,
-      status_data                               => status_3_data,
-      status_stb                                => status_3_stb,
-      ctrl_addr                                 => ctrl_3_addr,
-      ctrl_data                                 => ctrl_3_data,
-      ctrl_stb                                  => ctrl_3_stb,
-      axis_slave_tvalid                         => axis_slave_3_tvalid,
-      axis_slave_tready                         => axis_slave_3_tready,
-      axis_slave_tdata                          => axis_slave_3_tdata,
-      axis_slave_tid                            => axis_slave_3_tid,
-      axis_slave_tlast                          => axis_slave_3_tlast,
-      axis_slave_irq                            => axis_slave_3_irq,
-      axis_master_tvalid                        => axis_master_3_tvalid,
-      axis_master_tready                        => axis_master_3_tready,
-      axis_master_tdata                         => axis_master_3_tdata,
-      axis_master_tdest                         => axis_master_3_tdest,
-      axis_master_tlast                         => axis_master_3_tlast,
-      axis_master_irq                           => axis_master_3_irq,
-      trigger_stb                               => trigger_stb);
-
-  -- The output of either threshold trigger is controlled by control registers, so ORing them is
-  -- not an issue as only one should be active at a time.
-  trigger_stb                                   <= threshold_exceeded_stb OR threshold_not_exceeded_stb;
-
   -- Unused Accelerators
+  axis_slave_3_tready                           <= '0';
+  axis_slave_3_irq                              <= '0';
+  axis_master_3_tvalid                          <= '0';
+  axis_master_3_tdata                           <= x"0000000000000000";
+  axis_master_3_tdest                           <= "000";
+  axis_master_3_tlast                           <= '0';
+  axis_master_3_irq                             <= '0';
+  status_3_data                                 <= x"00000000";
   axis_slave_4_tready                           <= '0';
   axis_slave_4_irq                              <= '0';
   axis_master_4_tvalid                          <= '0';
