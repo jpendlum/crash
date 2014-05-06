@@ -52,11 +52,15 @@ entity zc706 is
     -- USRP DDR Interface
     RX_DATA_CLK_N         : in    std_logic;
     RX_DATA_CLK_P         : in    std_logic;
-    RX_DATA_N             : in    std_logic_vector(6 downto 0);
-    RX_DATA_P             : in    std_logic_vector(6 downto 0);
-    TX_DATA_N             : out   std_logic_vector(7 downto 0);
-    TX_DATA_P             : out   std_logic_vector(7 downto 0);
-    SPARE                 : out   std_logic;
+    RX_DATA_N             : in    std_logic_vector(4 downto 0);
+    RX_DATA_P             : in    std_logic_vector(4 downto 0);
+    RX_DATA_STB_N         : in    std_logic;
+    RX_DATA_STB_P         : in    std_logic;
+    TX_DATA_N             : out   std_logic_vector(5 downto 0);
+    TX_DATA_P             : out   std_logic_vector(5 downto 0);
+    TX_DATA_STB_N         : out   std_logic;
+    TX_DATA_STB_P         : out   std_logic;
+    SPARE                 : out   std_logic_vector(4 downto 0);
     UART_TX               : out   std_logic);
 end entity;
 
@@ -351,10 +355,14 @@ architecture RTL of zc706 is
       UART_TX                     : out   std_logic;                      -- UART
       RX_DATA_CLK_N               : in    std_logic;                      -- Receive data clock (N)
       RX_DATA_CLK_P               : in    std_logic;                      -- Receive data clock (P)
-      RX_DATA_N                   : in    std_logic_vector(6 downto 0);   -- Receive data (N)
-      RX_DATA_P                   : in    std_logic_vector(6 downto 0);   -- Receive data (N)
-      TX_DATA_N                   : out   std_logic_vector(7 downto 0);   -- Transmit data (N)
-      TX_DATA_P                   : out   std_logic_vector(7 downto 0);   -- Transmit data (P)
+      RX_DATA_N                   : in    std_logic_vector(4 downto 0);   -- Receive data (N)
+      RX_DATA_P                   : in    std_logic_vector(4 downto 0);   -- Receive data (P)
+      RX_DATA_STB_N               : in    std_logic;                      -- Receive data strobe (N)
+      RX_DATA_STB_P               : in    std_logic;                      -- Receive data strobe (P)
+      TX_DATA_N                   : out   std_logic_vector(5 downto 0);   -- Transmit data (N)
+      TX_DATA_P                   : out   std_logic_vector(5 downto 0);   -- Transmit data (P)
+      TX_DATA_STB_N               : out   std_logic;                      -- Transmit data strobe (N)
+      TX_DATA_STB_P               : out   std_logic;                      -- Transmit data strobe (P)
       -- Clock and Reset
       clk                         : in    std_logic;
       rst_n                       : in    std_logic;
@@ -908,15 +916,19 @@ begin
   inst_usrp_ddr_intf_axis : usrp_ddr_intf_axis
     generic map (
       DDR_CLOCK_FREQ                            => 100e6,
-      BAUD                                      => 115200)
+      BAUD                                      => 1e6)
     port map (
       UART_TX                                   => UART_TX,
       RX_DATA_CLK_N                             => RX_DATA_CLK_N,
       RX_DATA_CLK_P                             => RX_DATA_CLK_P,
       RX_DATA_N                                 => RX_DATA_N,
       RX_DATA_P                                 => RX_DATA_P,
+      RX_DATA_STB_N                             => RX_DATA_STB_N,
+      RX_DATA_STB_P                             => RX_DATA_STB_P,
       TX_DATA_N                                 => TX_DATA_N,
       TX_DATA_P                                 => TX_DATA_P,
+      TX_DATA_STB_N                             => TX_DATA_STB_N,
+      TX_DATA_STB_P                             => TX_DATA_STB_P,
       clk                                       => clk,
       rst_n                                     => rst_glb_n,
       status_addr                               => status_1_addr,
@@ -1013,6 +1025,6 @@ begin
   axis_master_7_irq                             <= '0';
   status_7_data                                 <= x"00000000";
 
-  SPARE                                         <= 'Z';
+  SPARE                                         <= (others=>'Z');
 
 end architecture;

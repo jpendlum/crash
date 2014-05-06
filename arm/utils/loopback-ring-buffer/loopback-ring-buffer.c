@@ -123,9 +123,12 @@ int main (int argc, char **argv) {
   while(!crash_get_bit(usrp_intf_rx->regs,USRP_TX_CAL_COMPLETE));
 
   // Set USRP Mode
-  while(crash_get_bit(usrp_intf_rx->regs,USRP_UART_BUSY));
-  crash_write_reg(usrp_intf_rx->regs,USRP_USRP_MODE_CTRL,TX_PASSTHRU_MODE + RX_TX_LOOPBACK_MODE);
-  while(crash_get_bit(usrp_intf_rx->regs,USRP_UART_BUSY));
+  while(crash_get_bit(usrp_intf_tx->regs,USRP_UART_BUSY));
+  crash_write_reg(usrp_intf_tx->regs,USRP_USRP_MODE_CTRL,CMD_TX_MODE + TX_PASSTHRU_MODE);
+  while(crash_get_bit(usrp_intf_tx->regs,USRP_UART_BUSY));
+  while(crash_get_bit(usrp_intf_tx->regs,USRP_UART_BUSY));
+  crash_write_reg(usrp_intf_tx->regs,USRP_USRP_MODE_CTRL,CMD_RX_MODE + RX_TX_LOOPBACK_MODE);
+  while(crash_get_bit(usrp_intf_tx->regs,USRP_UART_BUSY));
 
   // Setup RX path
   crash_write_reg(usrp_intf_rx->regs, USRP_AXIS_MASTER_TDEST, DMA_PLBLOCK_ID);  // Set tdest to ps_pl_interface

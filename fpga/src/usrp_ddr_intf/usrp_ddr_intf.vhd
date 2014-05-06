@@ -62,7 +62,7 @@ use unisim.vcomponents.all;
 entity usrp_ddr_intf is
   generic (
     DDR_CLOCK_FREQ          : integer := 100e6;       -- Clock rate of DDR interface
-    BAUD                    : integer := 115200);     -- UART baud rate
+    BAUD                    : integer := 1e6);        -- UART baud rate
   port (
     reset                   : in    std_logic;                      -- Asynchronous reset
     -- Control registers (internally synchronized to clk_rx clock domain)
@@ -91,10 +91,14 @@ entity usrp_ddr_intf is
     -- Physical Transmit / Receive data interface
     RX_DATA_CLK_N           : in    std_logic;                      -- Receive data clock (N)
     RX_DATA_CLK_P           : in    std_logic;                      -- Receive data clock (P)
-    RX_DATA_N               : in    std_logic_vector(6 downto 0);   -- Receive data (N)
-    RX_DATA_P               : in    std_logic_vector(6 downto 0);   -- Receive data (N)
-    TX_DATA_N               : out   std_logic_vector(7 downto 0);   -- Transmit data (N)
-    TX_DATA_P               : out   std_logic_vector(7 downto 0);   -- Transmit data (P)
+    RX_DATA_N               : in    std_logic_vector(4 downto 0);   -- Receive data (N)
+    RX_DATA_P               : in    std_logic_vector(4 downto 0);   -- Receive data (P)
+    RX_DATA_STB_N           : in    std_logic;                      -- Receive data strobe (N)
+    RX_DATA_STB_P           : in    std_logic;                      -- Receive data strobe (P)
+    TX_DATA_N               : out   std_logic_vector(5 downto 0);   -- Transmit data (N)
+    TX_DATA_P               : out   std_logic_vector(5 downto 0);   -- Transmit data (P)
+    TX_DATA_STB_N           : out   std_logic;                      -- Transmit data strobe (N)
+    TX_DATA_STB_P           : out   std_logic;                      -- Transmit data strobe (P)
     clk_rx_locked           : out   std_logic;                      -- RX data MMCM clock locked
     clk_rx_phase            : out   std_logic_vector(9 downto 0);   -- RX data MMCM phase offset, 0 - 559
     rx_phase_init           : in    std_logic_vector(9 downto 0);   -- RX data MMCM phase offset initialization, 0 - 559
@@ -170,9 +174,9 @@ architecture RTL of usrp_ddr_intf is
 
   component mmcm_ddr_to_sdr is
     port (
-      CLKIN_100MHz              : in     std_logic;
+      CLKIN_300MHz              : in     std_logic;
       CLKOUT_100MHz             : out    std_logic;
-      CLKOUT_200MHz             : out    std_logic;
+      CLKOUT_300MHz             : out    std_logic;
       -- Dynamic phase shift ports
       PSCLK                     : in     std_logic;
       PSEN                      : in     std_logic;
@@ -204,7 +208,7 @@ architecture RTL of usrp_ddr_intf is
   component uart is
     generic (
       CLOCK_FREQ        : integer := 100e6;           -- Input clock frequency (Hz)
-      BAUD              : integer := 115200;          -- Baud rate (bits/sec)
+      BAUD              : integer := 1e6;             -- Baud rate (bits/sec)
       DATA_BITS         : integer := 8;               -- Number of data bits
       PARITY            : string  := "MARK";          -- EVEN, ODD, MARK (always = '1'), SPACE (always = '0'), NONE
       NO_STROBE_ON_ERR  : string  := "TRUE");         -- No rx_data_stb if error in received data.
@@ -222,30 +226,34 @@ architecture RTL of usrp_ddr_intf is
       rx                : in    std_logic);           -- RX input
   end component;
 
-  component fifo_32to16
+  component fifo_16x15
     port (
       rst               : in    std_logic;
       wr_clk            : in    std_logic;
       rd_clk            : in    std_logic;
-      din               : in    std_logic_vector(31 downto 0);
+      din               : in    std_logic_vector(14 downto 0);
       wr_en             : in    std_logic;
       rd_en             : in    std_logic;
-      dout              : out   std_logic_vector(15 downto 0);
+      dout              : out   std_logic_vector(14 downto 0);
       full              : out   std_logic;
-      empty             : out   std_logic);
+      almost_full       : out   std_logic;
+      empty             : out   std_logic;
+      almost_empty      : out   std_logic);
   end component;
 
-  component fifo_14to28
+  component fifo_16x18
     port (
       rst               : in    std_logic;
       wr_clk            : in    std_logic;
       rd_clk            : in    std_logic;
-      din               : in    std_logic_vector(13 downto 0);
+      din               : in    std_logic_vector(17 downto 0);
       wr_en             : in    std_logic;
       rd_en             : in    std_logic;
-      dout              : out   std_logic_vector(27 downto 0);
+      dout              : out   std_logic_vector(17 downto 0);
       full              : out   std_logic;
-      empty             : out   std_logic);
+      almost_full       : out   std_logic;
+      empty             : out   std_logic;
+      almost_empty      : out   std_logic);
   end component;
 
   component cic_decimator is
@@ -379,9 +387,9 @@ architecture RTL of usrp_ddr_intf is
   signal tx_state                     : tx_state_type;
 
   signal clk_rx                       : std_logic;
-  signal clk_rx_2x                    : std_logic;
+  signal clk_rx_3x                    : std_logic;
   signal clk_tx                       : std_logic;
-  signal clk_tx_2x                    : std_logic;
+  signal clk_tx_3x                    : std_logic;
   signal ddr_data_clk                 : std_logic;
   signal ddr_data_clk_bufg            : std_logic;
   signal clk_rx_locked_int            : std_logic;
@@ -444,34 +452,42 @@ architecture RTL of usrp_ddr_intf is
   signal rx_cic_decim_ack_int         : std_logic;
   signal tx_cic_interp_ack_int        : std_logic;
 
-  -- 2x FIFO signals
-  signal tx_2x_fifo_din               : std_logic_vector(31 downto 0);
-  signal tx_2x_fifo_full_n            : std_logic;
-  signal tx_2x_fifo_empty_n           : std_logic;
-  signal tx_2x_fifo_dout              : std_logic_vector(15 downto 0);
-  signal tx_2x_fifo_full              : std_logic;
-  signal tx_2x_fifo_empty             : std_logic;
-  signal rx_2x_fifo_din               : std_logic_vector(13 downto 0);
-  signal rx_2x_fifo_full_n            : std_logic;
-  signal rx_2x_fifo_empty_n           : std_logic;
-  signal rx_2x_fifo_dout              : std_logic_vector(27 downto 0);
-  signal rx_2x_fifo_full              : std_logic;
-  signal rx_2x_fifo_empty             : std_logic;
+  -- CRASH-USRP interface signals
+  signal tx_data_3x_i           : std_logic_vector(5 downto 0);
+  signal tx_data_3x_q           : std_logic_vector(5 downto 0);
+  signal tx_data_3x_stb         : std_logic;
+  signal tx_data_3x_ddr         : std_logic_vector(5 downto 0);
+  signal tx_data_3x_stb_ddr     : std_logic;
+  signal tx_fifo_3x_din_i       : std_logic_vector(17 downto 0);
+  signal tx_fifo_3x_din_q       : std_logic_vector(17 downto 0);
+  signal tx_fifo_3x_dout_i      : std_logic_vector(17 downto 0);
+  signal tx_fifo_3x_dout_q      : std_logic_vector(17 downto 0);
+  signal tx_fifo_3x_rd_en       : std_logic;
+  signal tx_fifo_3x_wr_en       : std_logic;
+  signal tx_fifo_3x_full        : std_logic;
+  signal tx_fifo_3x_empty       : std_logic;
+  signal tx_cnt                 : integer range 0 to 2;
+
+  signal rx_data_i              : std_logic_vector(13 downto 0);
+  signal rx_data_q              : std_logic_vector(13 downto 0);
+  signal rx_data_3x_i           : std_logic_vector(4 downto 0);
+  signal rx_data_3x_q           : std_logic_vector(4 downto 0);
+  signal rx_data_3x_stb         : std_logic;
+  signal rx_data_3x_ddr         : std_logic_vector(4 downto 0);
+  signal rx_data_3x_stb_ddr     : std_logic;
+  signal rx_fifo_3x_din_i       : std_logic_vector(14 downto 0);
+  signal rx_fifo_3x_din_q       : std_logic_vector(14 downto 0);
+  signal rx_fifo_3x_dout_i      : std_logic_vector(14 downto 0);
+  signal rx_fifo_3x_dout_q      : std_logic_vector(14 downto 0);
+  signal rx_fifo_3x_rd_en       : std_logic;
+  signal rx_fifo_3x_wr_en       : std_logic;
+  signal rx_fifo_3x_full        : std_logic;
+  signal rx_fifo_3x_empty       : std_logic;
 
   -- RX signals
-  signal rx_data_a                    : std_logic_vector(13 downto 0);
-  signal rx_data_b                    : std_logic_vector(13 downto 0);
-  signal rx_data_a_ddr                : std_logic_vector(13 downto 0);
-  signal rx_data_b_ddr                : std_logic_vector(13 downto 0);
-  signal rx_data_2x_a                 : std_logic_vector( 6 downto 0);
-  signal rx_data_2x_b                 : std_logic_vector( 6 downto 0);
-  signal rx_data_2x_ddr               : std_logic_vector( 6 downto 0);
-
   signal rx_cic_rate                  : std_logic_vector(10 downto 0);
   signal rx_cic_rate_we               : std_logic;
 
-  signal rx_data_i                    : std_logic_vector(13 downto 0);
-  signal rx_data_q                    : std_logic_vector(13 downto 0);
   signal rx_cic_nd                    : std_logic;
   signal rx_cic_din_i                 : std_logic_vector(13 downto 0);
   signal rx_cic_din_q                 : std_logic_vector(13 downto 0);
@@ -513,17 +529,11 @@ architecture RTL of usrp_ddr_intf is
   signal rx_fifo_dout                 : std_logic_vector(63 downto 0);
 
   -- TX signals
-  signal tx_data_i                    : std_logic_vector(31 downto 0);
-  signal tx_data_q                    : std_logic_vector(31 downto 0);
-  signal tx_data_a                    : std_logic_vector(15 downto 0);
-  signal tx_data_b                    : std_logic_vector(15 downto 0);
-  signal tx_data_2x_a                 : std_logic_vector( 7 downto 0);
-  signal tx_data_2x_b                 : std_logic_vector( 7 downto 0);
-  signal tx_data_2x_ddr               : std_logic_vector( 7 downto 0);
-
   signal tx_cic_rate                  : std_logic_vector(10 downto 0);
   signal tx_cic_rate_we               : std_logic;
 
+  signal tx_data_i                    : std_logic_vector(31 downto 0);
+  signal tx_data_q                    : std_logic_vector(31 downto 0);
   signal tx_cic_nd                    : std_logic;
   signal tx_cic_nd_int                : std_logic;
   signal tx_cic_din_i                 : std_logic_vector(19 downto 0);
@@ -733,67 +743,122 @@ begin
   -----------------------------------------------------------------------------
   -- RX Path
   -----------------------------------------------------------------------------
-  -- Route BUFR DDR data clock to MMCM to generate a phase shifted
+  -- Route BUFG DDR data clock to MMCM to generate a phase shifted
   -- global clock whose rising edge is ideally in the middle of
   -- the DDR data bit
   inst_rx_mmcm_ddr_to_sdr : mmcm_ddr_to_sdr
     port map (
-      CLKIN_100MHz                  => ddr_data_clk_bufg,
-      CLKOUT_100MHz                 => clk_rx,
-      CLKOUT_200MHz                 => clk_rx_2x,
-      PSCLK                         => clk_rx,
-      PSEN                          => rx_psen,
-      PSINCDEC                      => rx_psincdec,
-      PSDONE                        => rx_psdone,
-      RESET                         => reset,
-      LOCKED                        => clk_rx_locked_int);
+      CLKIN_300MHz                    => ddr_data_clk_bufg,
+      CLKOUT_100MHz                   => clk_rx,
+      CLKOUT_300MHz                   => clk_rx_3x,
+      PSCLK                           => clk_rx,
+      PSEN                            => rx_psen,
+      PSINCDEC                        => rx_psincdec,
+      PSDONE                          => rx_psdone,
+      RESET                           => reset,
+      LOCKED                          => clk_rx_locked_int);
 
-  rx_reset                          <= NOT(clk_rx_locked_int);
-
--- TX data fifo, Interleaved DDR 8 bit I & Q to interleaved SDR 16 bit I & Q
-  inst_rx_2x_fifo : fifo_14to28
-    port map (
-      rst                       => rx_reset,
-      wr_clk                    => clk_rx_2x,
-      rd_clk                    => clk_rx,
-      din                       => rx_2x_fifo_din,
-      wr_en                     => rx_2x_fifo_full_n,
-      rd_en                     => rx_2x_fifo_empty_n,
-      dout                      => rx_2x_fifo_dout,
-      full                      => rx_2x_fifo_full,
-      empty                     => rx_2x_fifo_empty);
-
-  rx_2x_fifo_full_n             <= NOT(rx_2x_fifo_full);
-  rx_2x_fifo_empty_n            <= NOT(rx_2x_fifo_empty);
-  rx_2x_fifo_din                <= rx_data_2x_a & rx_data_2x_b;
-  rx_data_i                     <= rx_2x_fifo_dout(27 downto 21) & rx_2x_fifo_dout(13 downto 7);
-  rx_data_q                     <= rx_2x_fifo_dout(20 downto 14) & rx_2x_fifo_dout(6 downto 0);
+  rx_reset                            <= NOT(clk_rx_locked_int);
 
   -- DDR LVDS Data Input
-  gen_rx_ddr_lvds : for i in 0 to 6 generate
+  gen_rx_ddr_lvds : for i in 0 to 4 generate
     inst_IDDR : IDDR
       generic map (
-        DDR_CLK_EDGE                => "SAME_EDGE_PIPELINED",
-        SRTYPE                      => "ASYNC")
+        DDR_CLK_EDGE                  => "SAME_EDGE_PIPELINED",
+        SRTYPE                        => "ASYNC")
       port map (
-        Q1                          => rx_data_2x_a(i),
-        Q2                          => rx_data_2x_b(i),
-        C                           => clk_rx_2x,
-        CE                          => '1',
-        D                           => rx_data_2x_ddr(i),
-        R                           => rx_reset,
-        S                           => '0');
+        Q1                            => rx_data_3x_i(i),
+        Q2                            => rx_data_3x_q(i),
+        C                             => clk_rx_3x,
+        CE                            => '1',
+        D                             => rx_data_3x_ddr(i),
+        R                             => rx_reset,
+        S                             => '0');
 
     inst_IBUFDS : IBUFDS
       generic map (
-        DIFF_TERM                   => TRUE,
-        IOSTANDARD                  => "DEFAULT")
+        DIFF_TERM                     => TRUE,
+        IOSTANDARD                    => "DEFAULT")
       port map (
-        I                           => RX_DATA_P(i),
-        IB                          => RX_DATA_N(i),
-        O                           => rx_data_2x_ddr(i));
+        I                             => RX_DATA_P(i),
+        IB                            => RX_DATA_N(i),
+        O                             => rx_data_3x_ddr(i));
   end generate;
 
+  inst_rx_stb_IDDR : IDDR
+    generic map (
+      DDR_CLK_EDGE                    => "SAME_EDGE_PIPELINED",
+      SRTYPE                          => "ASYNC")
+    port map (
+      Q1                              => open,
+      Q2                              => rx_data_3x_stb,
+      C                               => clk_rx_3x,
+      CE                              => '1',
+      D                               => rx_data_3x_stb_ddr,
+      R                               => rx_reset,
+      S                               => '0');
+
+  inst_rx_stb_IBUFDS : IBUFDS
+    generic map (
+      DIFF_TERM                       => TRUE,
+      IOSTANDARD                      => "DEFAULT")
+    port map (
+      I                               => RX_DATA_STB_P,
+      IB                              => RX_DATA_STB_N,
+      O                               => rx_data_3x_stb_ddr);
+
+  proc_rx_data_assemble : process(clk_rx_3x,rx_reset)
+  begin
+    if (rx_reset = '1') then
+      rx_fifo_3x_din_i                  <= (others=>'0');
+      rx_fifo_3x_din_q                  <= (others=>'0');
+      rx_fifo_3x_wr_en                  <= '0';
+    else
+      if rising_edge(clk_rx_3x) then
+        rx_fifo_3x_wr_en                <= rx_data_3x_stb;
+        rx_fifo_3x_din_i(4 downto 0)    <= rx_data_3x_i;
+        rx_fifo_3x_din_i(9 downto 5)    <= rx_fifo_3x_din_i(4 downto 0);
+        rx_fifo_3x_din_i(14 downto 10)  <= rx_fifo_3x_din_i(9 downto 5);
+        rx_fifo_3x_din_q(4 downto 0)    <= rx_data_3x_q;
+        rx_fifo_3x_din_q(9 downto 5)    <= rx_fifo_3x_din_q(4 downto 0);
+        rx_fifo_3x_din_q(14 downto 10)  <= rx_fifo_3x_din_q(9 downto 5);
+      end if;
+    end if;
+  end process;
+
+  inst_rx_fifo_i : fifo_16x15
+    port map (
+      rst                             => rx_reset,
+      wr_clk                          => clk_rx_3x,
+      rd_clk                          => clk_rx,
+      din                             => rx_fifo_3x_din_i,
+      wr_en                           => rx_fifo_3x_wr_en,
+      rd_en                           => rx_fifo_3x_rd_en,
+      dout                            => rx_fifo_3x_dout_i,
+      full                            => rx_fifo_3x_full,
+      almost_full                     => open,
+      empty                           => rx_fifo_3x_empty,
+      almost_empty                    => open);
+
+  inst_rx_fifo_q : fifo_16x15
+    port map (
+      rst                             => rx_reset,
+      wr_clk                          => clk_rx_3x,
+      rd_clk                          => clk_rx,
+      din                             => rx_fifo_3x_din_q,
+      wr_en                           => rx_fifo_3x_wr_en,
+      rd_en                           => rx_fifo_3x_rd_en,
+      dout                            => rx_fifo_3x_dout_q,
+      full                            => open,
+      almost_full                     => open,
+      empty                           => open,
+      almost_empty                    => open);
+
+  rx_fifo_3x_rd_en                    <= NOT(rx_fifo_3x_empty);
+  rx_data_i                           <= rx_fifo_3x_dout_i(14 downto 1); -- Sample data is only 14-bit wide
+  rx_data_q                           <= rx_fifo_3x_dout_q(14 downto 1);
+
+  -- RX chain filtering
   rx_cic_rate                         <= rx_cic_decim_sync;
   rx_cic_rate_we                      <= rx_cic_decim_stb OR rx_enable_stb;
 
@@ -954,7 +1019,7 @@ begin
       rx_fifo_overflow_latch_int      <= '0';
     else
       if rising_edge(clk_rx) then
-        if (rx_fifo_wr_en = '1' AND rx_fifo_full = '1') then
+        if (rx_fifo_wr_en_int = '1' AND rx_fifo_full = '1') then
           rx_fifo_overflow_latch_int  <= '1';
         end if;
         if (rx_fifo_overflow_clr_sync = '1') then
@@ -971,9 +1036,9 @@ begin
   -- RX data clock.
   inst_tx_mmcm_ddr_to_sdr : mmcm_ddr_to_sdr
     port map (
-      CLKIN_100MHz                  => ddr_data_clk_bufg,
+      CLKIN_300MHz                  => ddr_data_clk_bufg,
       CLKOUT_100MHz                 => clk_tx,
-      CLKOUT_200MHz                 => clk_tx_2x,
+      CLKOUT_300MHz                 => clk_tx_3x,
       PSCLK                         => clk_tx,
       PSEN                          => tx_psen,
       PSINCDEC                      => tx_psincdec,
@@ -983,55 +1048,84 @@ begin
 
   tx_reset                          <= NOT(clk_tx_locked_int);
 
-  -- LVDS DDR Data Interface, 2x Clock Domain (200 MHz)
-  -- Transmit 16-bit TX I/Q data at 200 MHz DDR.
+  -- LVDS DDR Data Interface, 3x Clock Domain (300 MHz)
+  -- Transmit 16-bit TX I/Q data at 300 MHz DDR.
+  inst_tx_fifo_i : fifo_16x18
+    port map (
+      rst                           => tx_reset,
+      wr_clk                        => clk_tx,
+      rd_clk                        => clk_tx_3x,
+      din                           => tx_fifo_3x_din_i,
+      wr_en                         => tx_fifo_3x_wr_en,
+      rd_en                         => tx_fifo_3x_rd_en,
+      dout                          => tx_fifo_3x_dout_i,
+      full                          => tx_fifo_3x_full,
+      almost_full                   => open,
+      empty                         => tx_fifo_3x_empty,
+      almost_empty                  => open);
 
-  -- Buffer TX data so we can correct data alignment
-  proc_tx_data_1x : process(clk_tx, tx_enable)
+  inst_tx_fifo_q : fifo_16x18
+    port map (
+      rst                           => tx_reset,
+      wr_clk                        => clk_tx,
+      rd_clk                        => clk_tx_3x,
+      din                           => tx_fifo_3x_din_q,
+      wr_en                         => tx_fifo_3x_wr_en,
+      rd_en                         => tx_fifo_3x_rd_en,
+      dout                          => tx_fifo_3x_dout_q,
+      full                          => open,
+      almost_full                   => open,
+      empty                         => open,
+      almost_empty                  => open);
+
+  tx_fifo_3x_wr_en                  <= NOT(tx_fifo_3x_full);
+  tx_fifo_3x_rd_en                  <= tx_data_3x_stb;
+  tx_fifo_3x_din_i                  <= tx_trunc_dout_i & "00";
+  tx_fifo_3x_din_q                  <= tx_trunc_dout_q & "00";
+
+  proc_gen_tx_data : process(clk_tx_3x,tx_reset)
   begin
-    if (tx_enable = '0') then
-      tx_data_a                     <= (others=>'0');
-      tx_data_b                     <= (others=>'0');
+    if (tx_reset = '1') then
+      tx_cnt                        <= 0;
+      tx_data_3x_stb                <= '0';
+      tx_data_3x_i                  <= (others=>'0');
+      tx_data_3x_q                  <= (others=>'0');
     else
-      if rising_edge(clk_tx) then
-        tx_data_a                   <= tx_trunc_dout_i;
-        tx_data_b                   <= tx_trunc_dout_q;
+      if rising_edge(clk_tx_3x) then
+        case tx_cnt is
+          when 0 =>
+            tx_cnt                  <= tx_cnt + 1;
+            tx_data_3x_stb          <= '0';
+            tx_data_3x_i            <= tx_fifo_3x_dout_i(17 downto 12);
+            tx_data_3x_q            <= tx_fifo_3x_dout_q(17 downto 12);
+          when 1 =>
+            tx_cnt                  <= tx_cnt + 1;
+            tx_data_3x_stb          <= '0';
+            tx_data_3x_i            <= tx_fifo_3x_dout_i(11 downto 6);
+            tx_data_3x_q            <= tx_fifo_3x_dout_q(11 downto 6);
+          when 2 =>
+            tx_cnt                  <= 0;
+            tx_data_3x_stb          <= NOT(tx_fifo_empty);
+            tx_data_3x_i            <= tx_fifo_3x_dout_i(5 downto 0);
+            tx_data_3x_q            <= tx_fifo_3x_dout_q(5 downto 0);
+          when others =>
+        end case;
       end if;
     end if;
   end process;
 
-  -- TX data fifo, Interleaved SDR 16 bit I & Q to interleaved DDR 8 bit I & Q
-  inst_tx_2x_fifo : fifo_32to16
-    port map (
-      rst                       => tx_reset,
-      wr_clk                    => clk_tx,
-      rd_clk                    => clk_tx_2x,
-      din                       => tx_2x_fifo_din,
-      wr_en                     => tx_2x_fifo_full_n,
-      rd_en                     => tx_2x_fifo_empty_n,
-      dout                      => tx_2x_fifo_dout,
-      full                      => tx_2x_fifo_full,
-      empty                     => tx_2x_fifo_empty);
-
-  tx_2x_fifo_full_n             <= NOT(tx_2x_fifo_full);
-  tx_2x_fifo_empty_n            <= NOT(tx_2x_fifo_empty);
-  tx_data_2x_a                  <= tx_2x_fifo_dout(15 downto 8);
-  tx_data_2x_b                  <= tx_2x_fifo_dout( 7 downto 0);
-  tx_2x_fifo_din                <= tx_data_a(15 downto 8) & tx_data_b(15 downto 8) &
-                                   tx_data_a( 7 downto 0) & tx_data_b( 7 downto 0);
-
   -- DDR LVDS Data Output
-  gen_tx_ddr_lvds : for i in 0 to 7 generate
+  gen_tx_ddr_lvds : for i in 0 to 5 generate
     inst_ODDR : ODDR
       generic map (
-        DDR_CLK_EDGE                => "SAME_EDGE",
+        DDR_CLK_EDGE                => "OPPOSITE_EDGE",
         SRTYPE                      => "ASYNC")
       port map (
-        Q                           => tx_data_2x_ddr(i),
-        C                           => clk_tx_2x,
+        Q                           => tx_data_3x_ddr(i),
+        C                           => clk_tx_3x,
         CE                          => '1',
-        D1                          => tx_data_2x_a(i),
-        D2                          => tx_data_2x_b(i),
+        D1                          => tx_data_3x_i(i),
+        D2                          => tx_data_3x_q(i),
         R                           => tx_reset,
         S                           => '0');
 
@@ -1039,10 +1133,31 @@ begin
       generic map (
         IOSTANDARD                  => "DEFAULT")
       port map (
-        I                           => tx_data_2x_ddr(i),
+        I                           => tx_data_3x_ddr(i),
         O                           => TX_DATA_P(i),
         OB                          => TX_DATA_N(i));
   end generate;
+
+  inst_tx_stb_ODDR : ODDR
+    generic map (
+      DDR_CLK_EDGE                => "OPPOSITE_EDGE",
+      SRTYPE                      => "ASYNC")
+    port map (
+      Q                           => tx_data_3x_stb_ddr,
+      C                           => clk_tx_3x,
+      CE                          => '1',
+      D1                          => '0',
+      D2                          => tx_data_3x_stb,
+      R                           => tx_reset,
+      S                           => '0');
+
+  inst_tx_stb_OBUFDS : OBUFDS
+    generic map (
+      IOSTANDARD                  => "DEFAULT")
+    port map (
+      I                           => tx_data_3x_stb_ddr,
+      O                           => TX_DATA_STB_P,
+      OB                          => TX_DATA_STB_N);
 
   -- TX Interpolation Chain
   -- Convert 32 bit floating point to 20 bit fixed point (fix1_19)
@@ -1161,8 +1276,8 @@ begin
   tx_float2fix_nd                     <= '1'                    when tx_hb_bypass_sync = '1' AND tx_cic_bypass_sync = '1' else
                                          tx_cic_rfd_i           when tx_hb_bypass_sync = '1' AND tx_cic_bypass_sync = '0' else
                                          tx_halfband_rfd_i;
-  tx_halfband_din_i                   <= tx_data_i(19 downto 0) when tx_float2fix_bypass_sync = '1' else tx_float2fix_dout_i;
-  tx_halfband_din_q                   <= tx_data_q(19 downto 0) when tx_float2fix_bypass_sync = '1' else tx_float2fix_dout_q;
+  tx_halfband_din_i                   <= tx_data_i(15 downto 0) & x"0" when tx_float2fix_bypass_sync = '1' else tx_float2fix_dout_i;
+  tx_halfband_din_q                   <= tx_data_q(15 downto 0) & x"0" when tx_float2fix_bypass_sync = '1' else tx_float2fix_dout_q;
   tx_halfband_ce                      <= '1'                    when tx_cic_bypass_sync = '1' else tx_cic_rfd_i;
   tx_halfband_nd                      <= tx_halfband_rfd_i AND tx_halfband_nd_int;
   tx_halfband_nd_int                  <= tx_float2fix_nd        when tx_float2fix_bypass_sync = '1' else tx_float2fix_rdy_i;

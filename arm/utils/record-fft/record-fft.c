@@ -156,9 +156,12 @@ int main (int argc, char **argv) {
   while(!crash_get_bit(usrp_intf->regs,USRP_TX_CAL_COMPLETE));
 
   // Set USRP Mode
-  while(crash_get_bit(usrp_intf->regs,USRP_UART_BUSY));
-  crash_write_reg(usrp_intf->regs,USRP_USRP_MODE_CTRL,TX_DAC_RAW_MODE + RX_ADC_DSP_MODE);
-  while(crash_get_bit(usrp_intf->regs,USRP_UART_BUSY));
+  while(crash_get_bit(usrp_intf_tx->regs,USRP_UART_BUSY));
+  crash_write_reg(usrp_intf_tx->regs,USRP_USRP_MODE_CTRL,CMD_TX_MODE + TX_DAC_RAW_MODE);
+  while(crash_get_bit(usrp_intf_tx->regs,USRP_UART_BUSY));
+  while(crash_get_bit(usrp_intf_tx->regs,USRP_UART_BUSY));
+  crash_write_reg(usrp_intf_tx->regs,USRP_USRP_MODE_CTRL,CMD_RX_MODE + RX_ADC_DSP_MODE);
+  while(crash_get_bit(usrp_intf_tx->regs,USRP_UART_BUSY));
 
   crash_write_reg(usrp_intf->regs, USRP_AXIS_MASTER_TDEST, SPEC_SENSE_PLBLOCK_ID);  // Set tdest to spectrum sense block
   crash_write_reg(usrp_intf->regs, USRP_RX_PACKET_SIZE, number_samples);            // Set packet size

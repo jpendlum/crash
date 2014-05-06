@@ -53,7 +53,6 @@
 #include <fftw3.h>
 #include <crash-kmod.h>
 #include <libcrash.h>
-#include <arm_neon.h>
 
 // Global variable used to kill final loop
 int loop_prog = 0;
@@ -89,14 +88,9 @@ int main (int argc, char **argv) {
   float dma_time[30];
   float sensing_time[30];
   float decision_time[30];
-  float32x4_t floats_real;
-  float32x4_t floats_imag;
-  float32x4_t floats_real_sqr;
-  float32x4_t floats_imag_sqr;
-  float32x4_t floats_add;
-  float32x4_t floats_sqroot;
-  float32x4_t thresholds;
-  uint32x4_t compares;
+  float* fft_out_real;
+  float* fft_out_imag;
+  float fft_mag;
   uint32_t decisions[4096];
   fftwf_complex *in1;
   fftwf_complex out[8192];  // Must be 2x max FFT size
@@ -211,18 +205,14 @@ int main (int argc, char **argv) {
   }
 
   in1 = (fftw_complex *)(usrp_intf_rx->dma_buff);
+  fft_out_real = (float *)(&out[0][0]);
+  fft_out_imag = (float *)(&out[0][1]);
 
   start_overhead = crash_read_reg(usrp_intf_tx->regs,DMA_DEBUG_CNT);
   stop_overhead = crash_read_reg(usrp_intf_tx->regs,DMA_DEBUG_CNT);
   printf("Overhead (us): %f\n",(1e6/150e6)*(stop_overhead - start_overhead));
 
   do {
-    // Set threshold for NEON instruction
-    thresholds[0] = threshold;
-    thresholds[1] = threshold;
-    thresholds[2] = threshold;
-    thresholds[3] = threshold;
-
     // Setup FFTW3
     p1 = fftwf_plan_dft_1d(fft_size, in1, out, FFTW_FORWARD, FFTW_ESTIMATE);
 
@@ -250,9 +240,12 @@ int main (int argc, char **argv) {
     //printf("TX PHASE INIT: %d\n",crash_read_reg(usrp_intf_tx->regs,USRP_TX_PHASE_INIT));
     while(!crash_get_bit(usrp_intf_tx->regs,USRP_TX_CAL_COMPLETE));
 
-    // Set USRP Mode
+    // Set USRP TX / RX Modes
     while(crash_get_bit(usrp_intf_tx->regs,USRP_UART_BUSY));
-    crash_write_reg(usrp_intf_tx->regs,USRP_USRP_MODE_CTRL,TX_DAC_RAW_MODE + RX_ADC_DSP_MODE);
+    crash_write_reg(usrp_intf_tx->regs,USRP_USRP_MODE_CTRL,CMD_TX_MODE + TX_DAC_RAW_MODE);
+    while(crash_get_bit(usrp_intf_tx->regs,USRP_UART_BUSY));
+    while(crash_get_bit(usrp_intf_tx->regs,USRP_UART_BUSY));
+    crash_write_reg(usrp_intf_tx->regs,USRP_USRP_MODE_CTRL,CMD_RX_MODE + RX_ADC_DSP_MODE);
     while(crash_get_bit(usrp_intf_tx->regs,USRP_UART_BUSY));
 
     // Setup RX path
@@ -297,12 +290,10 @@ int main (int argc, char **argv) {
 
     // Create a CW signal to transmit
     float *tx_sample = (float*)(usrp_intf_tx->dma_buff);
-    for (i = 0; i < 4095; i++) {
+    for (i = 0; i < 4096; i++) {
       tx_sample[2*i+1] = 0;
       tx_sample[2*i] = 0.5;
     }
-    tx_sample[2*4095+1] = 0;
-    tx_sample[2*4095] = 0;
 
     // Load waveform into TX FIFO so it can immediately trigger
     crash_write(usrp_intf_tx, USRP_INTF_PLBLOCK_ID, number_samples);
@@ -315,51 +306,15 @@ int main (int argc, char **argv) {
       crash_read(usrp_intf_rx, USRP_INTF_PLBLOCK_ID, number_samples);
       // Run FFT
       fftwf_execute(p1);
-      for (i = 0; i < number_samples/4; i++) {
+      for (i = 0; i < number_samples; i++) {
         // Calculate sqrt(I^2 + Q^2)
-        floats_real[0] = out[4*i][0];
-        floats_real[1] = out[4*i+1][0];
-        floats_real[2] = out[4*i+2][0];
-        floats_real[3] = out[4*i+3][0];
-        floats_real_sqr = vmulq_f32(floats_real, floats_real);
-        floats_imag[0] = out[4*i][1];
-        floats_imag[1] = out[4*i+1][1];
-        floats_imag[2] = out[4*i+2][1];
-        floats_imag[3] = out[4*i+3][1];
-        floats_imag_sqr = vmulq_f32(floats_imag, floats_imag);
-        floats_add = vaddq_f32(floats_real_sqr,floats_imag_sqr);
-        floats_sqroot[0] = sqrt(floats_add[0]);
-        floats_sqroot[1] = sqrt(floats_add[1]);
-        floats_sqroot[2] = sqrt(floats_add[2]);
-        floats_sqroot[3] = sqrt(floats_add[3]);
-        compares = vcageq_f32(floats_sqroot,thresholds);
-        if (compares[0] == -1) {
+        fft_mag = sqrt(fft_out_real[i]*fft_out_real[i] + fft_out_imag[i]*fft_out_imag[i]);
+        if (fft_mag > threshold) {
           // Do not break loop
           threshold_exceeded = 1;
           // Save threshold data
-          threshold_exceeded_mag = floats_sqroot[0];
-          threshold_exceeded_index = 4*i;
-          break;
-        } else if (compares[1] == -1) {
-          // Do not break loop
-          threshold_exceeded = 1;
-          // Save threshold data
-          threshold_exceeded_mag = floats_sqroot[1];
-          threshold_exceeded_index = 4*i+1;
-          break;
-        } else if (compares[2] == -1) {
-          // Do not break loop
-          threshold_exceeded = 1;
-          // Save threshold data
-          threshold_exceeded_mag = floats_sqroot[2];
-          threshold_exceeded_index = 4*i+2;
-          break;
-        } else if (compares[3] == -1) {
-          // Do not break loop
-          threshold_exceeded = 1;
-          // Save threshold data
-          threshold_exceeded_mag = floats_sqroot[3];
-          threshold_exceeded_index = 4*i+3;
+          threshold_exceeded_mag = fft_mag;
+          threshold_exceeded_index = i;
           break;
         }
       }
@@ -377,26 +332,11 @@ int main (int argc, char **argv) {
       crash_read(usrp_intf_rx, USRP_INTF_PLBLOCK_ID, number_samples);
       // Run FFT
       fftwf_execute(p1);
-      for (i = 0; i < number_samples/4; i++) {
+      for (i = 0; i < number_samples; i++) {
         // Calculate sqrt(I^2 + Q^2)
-        floats_real[0] = out[4*i][0];
-        floats_real[1] = out[4*i+1][0];
-        floats_real[2] = out[4*i+2][0];
-        floats_real[3] = out[4*i+3][0];
-        floats_real_sqr = vmulq_f32(floats_real, floats_real);
-        floats_imag[0] = out[4*i][1];
-        floats_imag[1] = out[4*i+1][1];
-        floats_imag[2] = out[4*i+2][1];
-        floats_imag[3] = out[4*i+3][1];
-        floats_imag_sqr = vmulq_f32(floats_imag, floats_imag);
-        floats_add = vaddq_f32(floats_real_sqr,floats_imag_sqr);
-        floats_sqroot[0] = sqrt(floats_add[0]);
-        floats_sqroot[1] = sqrt(floats_add[1]);
-        floats_sqroot[2] = sqrt(floats_add[2]);
-        floats_sqroot[3] = sqrt(floats_add[3]);
-        compares = vcageq_f32(floats_sqroot,thresholds);
+        fft_mag = sqrt(fft_out_real[i]*fft_out_real[i] + fft_out_imag[i]*fft_out_imag[i]);
         // Was the threshold exceeded?
-        if (compares[0] == -1 || compares[1] == -1 || compares[2] == -1 || compares[3] == -1) {
+        if (fft_mag > threshold) {
           // Do not break loop
           threshold_exceeded = 1;
           break;
@@ -414,40 +354,17 @@ int main (int argc, char **argv) {
     crash_read(usrp_intf_rx, USRP_INTF_PLBLOCK_ID, number_samples);
     stop_dma = crash_read_reg(usrp_intf_tx->regs,DMA_DEBUG_CNT);
 
-    // Set a huge threshold so we have to examine every bin
-    thresholds[0] = 1000000000.0;
-    thresholds[1] = 1000000000.0;
-    thresholds[2] = 1000000000.0;
-    thresholds[3] = 1000000000.0;
     start_sensing = crash_read_reg(usrp_intf_tx->regs,DMA_DEBUG_CNT);
     fftwf_execute(p1);
-    for (i = 0; i < number_samples/4; i++) {
-      floats_real[0] = out[4*i][0];
-      floats_real[1] = out[4*i+1][0];
-      floats_real[2] = out[4*i+2][0];
-      floats_real[3] = out[4*i+3][0];
-      floats_real_sqr = vmulq_f32(floats_real, floats_real);
-      floats_imag[0] = out[4*i][1];
-      floats_imag[1] = out[4*i+1][1];
-      floats_imag[2] = out[4*i+2][1];
-      floats_imag[3] = out[4*i+3][1];
-      floats_imag_sqr = vmulq_f32(floats_imag, floats_imag);
-      floats_add = vaddq_f32(floats_real_sqr,floats_imag_sqr);
-      floats_sqroot[0] = sqrt(floats_add[0]);
-      floats_sqroot[1] = sqrt(floats_add[1]);
-      floats_sqroot[2] = sqrt(floats_add[2]);
-      floats_sqroot[3] = sqrt(floats_add[3]);
-      compares = vcageq_f32(floats_sqroot,thresholds);
-      decisions[4*i] = compares[0];
-      decisions[4*i+1] = compares[1];
-      decisions[4*i+2] = compares[2];
-      decisions[4*i+3] = compares[3];
+    for (i = 0; i < number_samples; i++) {
+      fft_mag = sqrt(fft_out_real[i]*fft_out_real[i] + fft_out_imag[i]*fft_out_imag[i]);
+      decisions[i] = (fft_mag > 100000000.0);
     }
     stop_sensing = crash_read_reg(usrp_intf_tx->regs,DMA_DEBUG_CNT);
 
     start_decision = crash_read_reg(usrp_intf_tx->regs,DMA_DEBUG_CNT);
     for (i = 0; i < number_samples; i++) {
-        if (decisions[i] == -1) {
+        if (decisions[i] == 1) {
         printf("This shouldn't happen\n");
       }
     }

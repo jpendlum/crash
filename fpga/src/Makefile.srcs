@@ -29,8 +29,8 @@ coregen/fft_axis.xco \
 coregen/fifo_8x64.xco \
 coregen/fifo_72x64.xco \
 coregen/fifo_64x8192.xco \
-coregen/fifo_14to28.xco \
-coregen/fifo_32to16.xco \
+coregen/fifo_16x15.xco \
+coregen/fifo_16x18.xco \
 coregen/fir_halfband_decimator.xco \
 coregen/fir_halfband_interpolator.xco \
 coregen/fix1_31_to_float32.xco \

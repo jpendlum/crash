@@ -140,7 +140,9 @@ int main (int argc, char **argv) {
 
   // Set USRP Mode
   while(crash_get_bit(usrp_intf->regs,USRP_UART_BUSY));
-  crash_write_reg(usrp_intf->regs,USRP_USRP_MODE_CTRL,TX_DAC_RAW_MODE + RX_ADC_DSP_MODE);
+  crash_write_reg(usrp_intf->regs,USRP_USRP_MODE_CTRL,CMD_TX_MODE + TX_DAC_RAW_MODE);
+  while(crash_get_bit(usrp_intf->regs,USRP_UART_BUSY));
+  crash_write_reg(usrp_intf->regs,USRP_USRP_MODE_CTRL,CMD_RX_MODE + RX_ADC_DC_OFF_MODE);
   while(crash_get_bit(usrp_intf->regs,USRP_UART_BUSY));
 
   crash_write_reg(usrp_intf->regs, USRP_AXIS_MASTER_TDEST, DMA_PLBLOCK_ID);   // Set tdest to ps_pl_interface

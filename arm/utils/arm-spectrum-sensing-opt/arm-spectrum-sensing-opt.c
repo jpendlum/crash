@@ -14,10 +14,11 @@
 **
 **
 **
-**  File:         arm-spectrum-decision.c
+**  File:         arm-spectrum-sense.c
 **  Author(s):    Jonathon Pendlum (jon.pendlum@gmail.com)
-**  Description:  Offload spectrum sensing to the FPGA, execute spectrum decision
-**                on the processor.
+**  Description:  Performs both Spectrum Sensing and the Spectrum Decision. Uses the FFTW3
+**                library of FFT kernels to speed up FFT computation. Additional optimizations
+**                using NEON SIMD instructions to speed up magnitude calculation.
 **
 **                Spectrum decision is simple: If all FFT bins are below
 **                the threshold -> transmit.
@@ -50,6 +51,7 @@
 #include <fcntl.h>
 #include <string.h>
 #include <getopt.h>
+#include <fftw3.h>
 #include <crash-kmod.h>
 #include <libcrash.h>
 #include <arm_neon.h>
@@ -74,23 +76,34 @@ int main (int argc, char **argv) {
   uint fft_size = 0;
   float threshold = 0.0;
   double gain = 0.0;
-  float* fft_data;
   int threshold_exceeded = 0;
   float threshold_exceeded_mag = 0.0;
   int threshold_exceeded_index = 0;
-  uint32_t start_thresholding;
-  uint32_t stop_thresholding;
+  uint32_t start_decision;
+  uint32_t stop_decision;
+  uint32_t start_sensing;
+  uint32_t stop_sensing;
   uint32_t start_overhead;
   uint32_t stop_overhead;
   uint32_t start_dma;
   uint32_t stop_dma;
   float dma_time[30];
-  float thresholding_time[30];
-  float32x4_t floats;
+  float sensing_time[30];
+  float decision_time[30];
+  float32x4_t floats_real;
+  float32x4_t floats_imag;
+  float32x4_t floats_real_sqr;
+  float32x4_t floats_imag_sqr;
+  float32x4_t floats_add;
+  float32x4_t floats_sqroot;
   float32x4_t thresholds;
   uint32x4_t compares;
-  struct crash_plblock *spec_sense;
+  uint32_t decisions[4096];
+  fftwf_complex *in1;
+  fftwf_complex out[8192];  // Must be 2x max FFT size
+  fftwf_plan p1;
   struct crash_plblock *usrp_intf_tx;
+  struct crash_plblock *usrp_intf_rx;
 
   // Parse command line arguments
   while (1) {
@@ -191,14 +204,15 @@ int main (int argc, char **argv) {
     return -1;
   }
 
-  spec_sense = crash_open(SPEC_SENSE_PLBLOCK_ID,READ);
-  if (spec_sense == 0) {
-    crash_close(usrp_intf_tx);
-    printf("ERROR: Failed to allocate spec_sense plblock\n");
+  usrp_intf_rx = crash_open(USRP_INTF_PLBLOCK_ID,READ);
+  if (usrp_intf_rx == 0) {
+    crash_close(usrp_intf_rx);
+    printf("ERROR: Failed to allocate usrp_intf_rx plblock\n");
     return -1;
   }
 
-  fft_data = (float *)spec_sense->dma_buff;
+  in1 = (fftw_complex *)(usrp_intf_rx->dma_buff);
+
   start_overhead = crash_read_reg(usrp_intf_tx->regs,DMA_DEBUG_CNT);
   stop_overhead = crash_read_reg(usrp_intf_tx->regs,DMA_DEBUG_CNT);
   printf("Overhead (us): %f\n",(1e6/150e6)*(stop_overhead - start_overhead));
@@ -209,6 +223,9 @@ int main (int argc, char **argv) {
     thresholds[1] = threshold;
     thresholds[2] = threshold;
     thresholds[3] = threshold;
+
+    // Setup FFTW3
+    p1 = fftwf_plan_dft_1d(fft_size, in1, out, FFTW_FORWARD, FFTW_ESTIMATE);
 
     // Global Reset to get us to a clean slate
     crash_reset(usrp_intf_tx);
@@ -244,7 +261,7 @@ int main (int argc, char **argv) {
 
     // Setup RX path
     crash_set_bit(usrp_intf_tx->regs, USRP_RX_FIFO_BYPASS);                       // Bypass RX FIFO so stale data in the FIFO does not cause latency
-    crash_write_reg(usrp_intf_tx->regs, USRP_AXIS_MASTER_TDEST, SPEC_SENSE_PLBLOCK_ID);  // Set tdest to spec_sense
+    crash_write_reg(usrp_intf_tx->regs, USRP_AXIS_MASTER_TDEST, DMA_PLBLOCK_ID);  // Set tdest to spec_sense
     crash_write_reg(usrp_intf_tx->regs, USRP_RX_PACKET_SIZE, number_samples);     // Set packet size
     crash_clear_bit(usrp_intf_tx->regs, USRP_RX_FIX2FLOAT_BYPASS);                // Do not bypass fix2float
     if (decim_rate == 1) {
@@ -292,32 +309,61 @@ int main (int argc, char **argv) {
     tx_sample[2*4095] = 0;
 
     // Load waveform into TX FIFO so it can immediately trigger
-    crash_write(usrp_intf_tx, USRP_INTF_PLBLOCK_ID, 4096);
-
-    // Setup Spectrum Sense
-    crash_write_reg(spec_sense->regs,SPEC_SENSE_AXIS_MASTER_TDEST,DMA_PLBLOCK_ID);  // Set Spectrum Sense block output destimation
-    crash_write_reg(spec_sense->regs,SPEC_SENSE_OUTPUT_MODE,1);                   // FFT Magnitude Data
-    crash_write_reg(spec_sense->regs,SPEC_SENSE_AXIS_CONFIG_TDATA,fft_size);      // FFT Size
-    crash_set_bit(spec_sense->regs,SPEC_SENSE_AXIS_CONFIG_TVALID);                // FFT Size Enable
-    crash_set_bit(spec_sense->regs,SPEC_SENSE_ENABLE_FFT);                        // Enable FFT
-    crash_clear_bit(spec_sense->regs,SPEC_SENSE_AXIS_CONFIG_TVALID);
-    //memcpy(&temp_int,&threshold,sizeof(float));                                   // Copy float value to an int without a cast
-    //crash_write_reg(spec_sense->regs,SPEC_SENSE_THRESHOLD,temp_int);              // Threshold level in single precision floating point
+    crash_write(usrp_intf_tx, USRP_INTF_PLBLOCK_ID, number_samples);
 
     crash_set_bit(usrp_intf_tx->regs,USRP_RX_ENABLE);                             // Enable RX
 
     // First, loop until threshold is exceeded
     j = 0;
     while (threshold_exceeded == 0) {
-      crash_read(spec_sense, SPEC_SENSE_PLBLOCK_ID, number_samples);
-      // Lower 32-bits of 64-bit AXI xfer is FFT magnitude data, so look at "every other"
-      // float in the buffer, hence the 2*i.
-      for (i = 0; i < number_samples; i++) {
-        if (fft_data[2*i] >= threshold) {
+      crash_read(usrp_intf_rx, USRP_INTF_PLBLOCK_ID, number_samples);
+      // Run FFT
+      fftwf_execute(p1);
+      for (i = 0; i < number_samples/4; i++) {
+        // Calculate sqrt(I^2 + Q^2)
+        floats_real[0] = out[4*i][0];
+        floats_real[1] = out[4*i+1][0];
+        floats_real[2] = out[4*i+2][0];
+        floats_real[3] = out[4*i+3][0];
+        floats_real_sqr = vmulq_f32(floats_real, floats_real);
+        floats_imag[0] = out[4*i][1];
+        floats_imag[1] = out[4*i+1][1];
+        floats_imag[2] = out[4*i+2][1];
+        floats_imag[3] = out[4*i+3][1];
+        floats_imag_sqr = vmulq_f32(floats_imag, floats_imag);
+        floats_add = vaddq_f32(floats_real_sqr,floats_imag_sqr);
+        floats_sqroot[0] = sqrt(floats_add[0]);
+        floats_sqroot[1] = sqrt(floats_add[1]);
+        floats_sqroot[2] = sqrt(floats_add[2]);
+        floats_sqroot[3] = sqrt(floats_add[3]);
+        compares = vcageq_f32(floats_sqroot,thresholds);
+        if (compares[0] == -1) {
+          // Do not break loop
           threshold_exceeded = 1;
           // Save threshold data
-          threshold_exceeded_mag = fft_data[2*i];
-          threshold_exceeded_index = i;
+          threshold_exceeded_mag = floats_sqroot[0];
+          threshold_exceeded_index = 4*i;
+          break;
+        } else if (compares[1] == -1) {
+          // Do not break loop
+          threshold_exceeded = 1;
+          // Save threshold data
+          threshold_exceeded_mag = floats_sqroot[1];
+          threshold_exceeded_index = 4*i+1;
+          break;
+        } else if (compares[2] == -1) {
+          // Do not break loop
+          threshold_exceeded = 1;
+          // Save threshold data
+          threshold_exceeded_mag = floats_sqroot[2];
+          threshold_exceeded_index = 4*i+2;
+          break;
+        } else if (compares[3] == -1) {
+          // Do not break loop
+          threshold_exceeded = 1;
+          // Save threshold data
+          threshold_exceeded_mag = floats_sqroot[3];
+          threshold_exceeded_index = 4*i+3;
           break;
         }
       }
@@ -329,17 +375,31 @@ int main (int argc, char **argv) {
       sleep(1);
     }
 
-    // Second, loop until threshold is not exceeded
+    // Second, perform specturm sensing and the spectrum decision
     while (threshold_exceeded == 1) {
       threshold_exceeded = 0;
-      crash_read(spec_sense, SPEC_SENSE_PLBLOCK_ID, number_samples);
+      crash_read(usrp_intf_rx, USRP_INTF_PLBLOCK_ID, number_samples);
+      // Run FFT
+      fftwf_execute(p1);
       for (i = 0; i < number_samples/4; i++) {
-        // NEON GCC Intrinsic to do a 4x floating point greater-than or equal to compare
-        floats[0] = fft_data[8*i];
-        floats[1] = fft_data[8*i+2];
-        floats[2] = fft_data[8*i+4];
-        floats[3] = fft_data[8*i+6];
-        compares = vcageq_f32(floats,thresholds);
+        // Calculate sqrt(I^2 + Q^2)
+        floats_real[0] = out[4*i][0];
+        floats_real[1] = out[4*i+1][0];
+        floats_real[2] = out[4*i+2][0];
+        floats_real[3] = out[4*i+3][0];
+        floats_real_sqr = vmulq_f32(floats_real, floats_real);
+        floats_imag[0] = out[4*i][1];
+        floats_imag[1] = out[4*i+1][1];
+        floats_imag[2] = out[4*i+2][1];
+        floats_imag[3] = out[4*i+3][1];
+        floats_imag_sqr = vmulq_f32(floats_imag, floats_imag);
+        floats_add = vaddq_f32(floats_real_sqr,floats_imag_sqr);
+        floats_sqroot[0] = sqrt(floats_add[0]);
+        floats_sqroot[1] = sqrt(floats_add[1]);
+        floats_sqroot[2] = sqrt(floats_add[2]);
+        floats_sqroot[3] = sqrt(floats_add[3]);
+        compares = vcageq_f32(floats_sqroot,thresholds);
+        // Was the threshold exceeded?
         if (compares[0] == -1 || compares[1] == -1 || compares[2] == -1 || compares[3] == -1) {
           // Do not break loop
           threshold_exceeded = 1;
@@ -355,37 +415,61 @@ int main (int argc, char **argv) {
     // Calculate how long the DMA and the thresholding took by using a counter in the FPGA
     // running at 150 MHz.
     start_dma = crash_read_reg(usrp_intf_tx->regs,DMA_DEBUG_CNT);
-    crash_read(spec_sense, SPEC_SENSE_PLBLOCK_ID, number_samples);
+    crash_read(usrp_intf_rx, USRP_INTF_PLBLOCK_ID, number_samples);
     stop_dma = crash_read_reg(usrp_intf_tx->regs,DMA_DEBUG_CNT);
+
     // Set a huge threshold so we have to examine every bin
     thresholds[0] = 1000000000.0;
     thresholds[1] = 1000000000.0;
     thresholds[2] = 1000000000.0;
     thresholds[3] = 1000000000.0;
-    start_thresholding = crash_read_reg(usrp_intf_tx->regs,DMA_DEBUG_CNT);
+    start_sensing = crash_read_reg(usrp_intf_tx->regs,DMA_DEBUG_CNT);
+    fftwf_execute(p1);
     for (i = 0; i < number_samples/4; i++) {
-      floats[0] = fft_data[8*i];
-      floats[1] = fft_data[8*i+2];
-      floats[2] = fft_data[8*i+4];
-      floats[3] = fft_data[8*i+6];
-      compares = vcageq_f32(floats,thresholds);
-      if (compares[0] == -1 || compares[1] == -1 || compares[2] == -1 || compares[3] == -1) {
+      floats_real[0] = out[4*i][0];
+      floats_real[1] = out[4*i+1][0];
+      floats_real[2] = out[4*i+2][0];
+      floats_real[3] = out[4*i+3][0];
+      floats_real_sqr = vmulq_f32(floats_real, floats_real);
+      floats_imag[0] = out[4*i][1];
+      floats_imag[1] = out[4*i+1][1];
+      floats_imag[2] = out[4*i+2][1];
+      floats_imag[3] = out[4*i+3][1];
+      floats_imag_sqr = vmulq_f32(floats_imag, floats_imag);
+      floats_add = vaddq_f32(floats_real_sqr,floats_imag_sqr);
+      floats_sqroot[0] = sqrt(floats_add[0]);
+      floats_sqroot[1] = sqrt(floats_add[1]);
+      floats_sqroot[2] = sqrt(floats_add[2]);
+      floats_sqroot[3] = sqrt(floats_add[3]);
+      compares = vcageq_f32(floats_sqroot,thresholds);
+      decisions[4*i] = compares[0];
+      decisions[4*i+1] = compares[1];
+      decisions[4*i+2] = compares[2];
+      decisions[4*i+3] = compares[3];
+    }
+    stop_sensing = crash_read_reg(usrp_intf_tx->regs,DMA_DEBUG_CNT);
+
+    start_decision = crash_read_reg(usrp_intf_tx->regs,DMA_DEBUG_CNT);
+    for (i = 0; i < number_samples; i++) {
+        if (decisions[i] == -1) {
         printf("This shouldn't happen\n");
       }
     }
-    stop_thresholding = crash_read_reg(usrp_intf_tx->regs,DMA_DEBUG_CNT);
+    stop_decision = crash_read_reg(usrp_intf_tx->regs,DMA_DEBUG_CNT);
 
     // Print threshold information
     printf("Threshold:\t\t\t%f\n",threshold);
     printf("Threshold Exceeded Index:\t%d\n",threshold_exceeded_index);
     printf("Threshold Exceeded Mag:\t\t%f\n",threshold_exceeded_mag);
     printf("DMA Time (us): %f\n",(1e6/150e6)*(stop_dma - start_dma));
-    printf("Thresholding Time (us): %f\n",(1e6/150e6)*(stop_thresholding - start_thresholding));
+    printf("Sensing Time (us): %f\n",(1e6/150e6)*(stop_sensing - start_sensing));
+    printf("Decision Time (us): %f\n",(1e6/150e6)*(stop_decision - start_decision));
 
     // Keep track of times so we can report an average at the end
     if (num_loops < 30) {
       dma_time[num_loops] = (1e6/150e6)*(stop_dma - start_dma);
-      thresholding_time[num_loops] = (1e6/150e6)*(stop_thresholding - start_thresholding);
+      sensing_time[num_loops] = (1e6/150e6)*(stop_sensing - start_sensing);
+      decision_time[num_loops] = (1e6/150e6)*(stop_decision - start_decision);
     }
     num_loops++;
 
@@ -394,7 +478,7 @@ int main (int argc, char **argv) {
     }
 
     // Force printf to flush since. We are at a real-time priority, so it cannot unless we force it.
-    //fflush(stdout);
+    fflush(stdout);
     //if (nanosleep(&ask_sleep,&act_sleep) < 0) {
     //    perror("nanosleep");
     //    exit(EXIT_FAILURE);
@@ -402,36 +486,42 @@ int main (int argc, char **argv) {
 
 cleanup:
     crash_clear_bit(usrp_intf_tx->regs,USRP_RX_ENABLE);                           // Disable RX
-    crash_clear_bit(spec_sense->regs,SPEC_SENSE_ENABLE_FFT);                      // Disable FFT
     crash_clear_bit(usrp_intf_tx->regs,USRP_TX_ENABLE);                           // Disable TX
     threshold_exceeded = 0;
     threshold_exceeded_mag = 0.0;
     threshold_exceeded_index = 0;
+    fftwf_destroy_plan(p1);
     sleep(1);
   } while (loop_prog == 1);
 
   float dma_time_avg = 0.0;
-  float thresholding_time_avg = 0.0;
+  float sensing_time_avg = 0.0;
+  float decision_time_avg = 0.0;
   if (num_loops > 30) {
     for (i = 0; i < 30; i++) {
       dma_time_avg += dma_time[i];
-      thresholding_time_avg += thresholding_time[i];
+      sensing_time_avg += sensing_time[i];
+      decision_time_avg += decision_time[i];
     }
     dma_time_avg = dma_time_avg/30;
-    thresholding_time_avg = thresholding_time_avg/30;
+    sensing_time_avg = sensing_time_avg/30;
+    decision_time_avg = decision_time_avg/30;
   } else {
     for (i = 0; i < num_loops; i++) {
       dma_time_avg += dma_time[i];
-      thresholding_time_avg += thresholding_time[i];
+      sensing_time_avg += sensing_time[i];
+      decision_time_avg += decision_time[i];
     }
     dma_time_avg = dma_time_avg/num_loops;
-    thresholding_time_avg = thresholding_time_avg/num_loops;
+    sensing_time_avg = sensing_time_avg/num_loops;
+    decision_time_avg = decision_time_avg/num_loops;
   }
   printf("Number of loops: %d\n",num_loops);
   printf("Average DMA time (us): %f\n",dma_time_avg);
-  printf("Average Thresholding time (us): %f\n",thresholding_time_avg);
+  printf("Average Sensing time (us): %f\n",sensing_time_avg);
+  printf("Average Decision time (us): %f\n",decision_time_avg);
 
   crash_close(usrp_intf_tx);
-  crash_close(spec_sense);
+  crash_close(usrp_intf_rx);
   return 0;
 }

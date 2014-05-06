@@ -153,14 +153,17 @@ int main (int argc, char **argv) {
   while(!crash_get_bit(usrp_intf->regs,USRP_TX_CAL_COMPLETE));
 
   // Set USRP Mode
-  while(crash_get_bit(usrp_intf->regs,USRP_UART_BUSY));
-  crash_write_reg(usrp_intf->regs,USRP_USRP_MODE_CTRL,TX_DAC_RAW_MODE + RX_ADC_DSP_MODE);
-  while(crash_get_bit(usrp_intf->regs,USRP_UART_BUSY));
+  while(crash_get_bit(usrp_intf_tx->regs,USRP_UART_BUSY));
+  crash_write_reg(usrp_intf_tx->regs,USRP_USRP_MODE_CTRL,CMD_TX_MODE + TX_DAC_RAW_MODE);
+  while(crash_get_bit(usrp_intf_tx->regs,USRP_UART_BUSY));
+  while(crash_get_bit(usrp_intf_tx->regs,USRP_UART_BUSY));
+  crash_write_reg(usrp_intf_tx->regs,USRP_USRP_MODE_CTRL,CMD_RX_MODE + RX_ADC_DSP_MODE);
+  while(crash_get_bit(usrp_intf_tx->regs,USRP_UART_BUSY));
 
   // Setup RX path
-  crash_write_reg(usrp_intf->regs, USRP_AXIS_MASTER_TDEST, DMA_PLBLOCK_ID);  // Set tdest to ps_pl_interface
+  crash_write_reg(usrp_intf->regs, USRP_AXIS_MASTER_TDEST, USRP_INTF_PLBLOCK_ID);  // Set tdest to ps_pl_interface
   crash_write_reg(usrp_intf->regs, USRP_RX_PACKET_SIZE, number_samples);     // Set packet size
-  crash_clear_bit(usrp_intf->regs, USRP_RX_FIX2FLOAT_BYPASS);                // Do not bypass fix2float
+  crash_set_bit(usrp_intf->regs, USRP_RX_FIX2FLOAT_BYPASS);                // Do not bypass fix2float
   if (decim_rate == 1) {
     crash_set_bit(usrp_intf->regs, USRP_RX_CIC_BYPASS);                      // Bypass CIC Filter
     crash_set_bit(usrp_intf->regs, USRP_RX_HB_BYPASS);                       // Bypass HB Filter
@@ -168,7 +171,7 @@ int main (int argc, char **argv) {
   } else if (decim_rate == 2) {
     crash_set_bit(usrp_intf->regs, USRP_RX_CIC_BYPASS);                      // Bypass CIC Filter
     crash_clear_bit(usrp_intf->regs, USRP_RX_HB_BYPASS);                     // Enable HB Filter
-    crash_write_reg(usrp_intf->regs, USRP_RX_GAIN, 1);                       // Set gain = 1
+    crash_write_reg(usrp_intf->regs, USRP_RX_GAIN, 1000);                       // Set gain = 1
   // Even, use both CIC and Halfband filters
   } else if ((decim_rate % 2) == 0) {
     crash_clear_bit(usrp_intf->regs, USRP_RX_CIC_BYPASS);                    // Enable CIC Filter
@@ -191,7 +194,7 @@ int main (int argc, char **argv) {
   }
 
   // Setup TX path
-  crash_clear_bit(usrp_intf->regs, USRP_TX_FIX2FLOAT_BYPASS);                // Do not bypass fix2float
+  crash_set_bit(usrp_intf->regs, USRP_TX_FIX2FLOAT_BYPASS);                // Do not bypass fix2float
   if (interp_rate == 1) {
     crash_set_bit(usrp_intf->regs, USRP_TX_CIC_BYPASS);                      // Bypass CIC Filter
     crash_set_bit(usrp_intf->regs, USRP_TX_HB_BYPASS);                       // Bypass HB Filter
@@ -199,7 +202,7 @@ int main (int argc, char **argv) {
   } else if (interp_rate == 2) {
     crash_set_bit(usrp_intf->regs, USRP_TX_CIC_BYPASS);                      // Bypass CIC Filter
     crash_clear_bit(usrp_intf->regs, USRP_TX_HB_BYPASS);                     // Enable HB Filter
-    crash_write_reg(usrp_intf->regs, USRP_TX_GAIN, 1);                       // Set gain = 1
+    crash_write_reg(usrp_intf->regs, USRP_TX_GAIN, 10000);                       // Set gain = 1
   // Even, use both CIC and Halfband filters
   } else if ((interp_rate % 2) == 0) {
     crash_clear_bit(usrp_intf->regs, USRP_TX_CIC_BYPASS);                    // Enable CIC Filter

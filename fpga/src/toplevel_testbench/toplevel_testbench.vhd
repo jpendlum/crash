@@ -258,17 +258,21 @@ architecture Testbench of toplevel_testbench is
 
   component usrp_ddr_intf_axis is
     generic (
-      DDR_CLOCK_FREQ              : integer := 100e6;       -- Clock rate of DDR interface
-      BAUD                        : integer := 115200);     -- UART baud rate
+      DDR_CLOCK_FREQ              : integer := 100e6;                     -- Clock rate of DDR interface
+      BAUD                        : integer := 1e6);                      -- UART baud rate
     port (
       -- USRP Interface
       UART_TX                     : out   std_logic;                      -- UART
       RX_DATA_CLK_N               : in    std_logic;                      -- Receive data clock (N)
       RX_DATA_CLK_P               : in    std_logic;                      -- Receive data clock (P)
-      RX_DATA_N                   : in    std_logic_vector(6 downto 0);   -- Receive data (N)
-      RX_DATA_P                   : in    std_logic_vector(6 downto 0);   -- Receive data (N)
-      TX_DATA_N                   : out   std_logic_vector(7 downto 0);   -- Transmit data (N)
-      TX_DATA_P                   : out   std_logic_vector(7 downto 0);   -- Transmit data (P)
+      RX_DATA_N                   : in    std_logic_vector(4 downto 0);   -- Receive data (N)
+      RX_DATA_P                   : in    std_logic_vector(4 downto 0);   -- Receive data (P)
+      RX_DATA_STB_N               : in    std_logic;                      -- Receive data strobe (N)
+      RX_DATA_STB_P               : in    std_logic;                      -- Receive data strobe (P)
+      TX_DATA_N                   : out   std_logic_vector(5 downto 0);   -- Transmit data (N)
+      TX_DATA_P                   : out   std_logic_vector(5 downto 0);   -- Transmit data (P)
+      TX_DATA_STB_N               : out   std_logic;                      -- Transmit data strobe (N)
+      TX_DATA_STB_P               : out   std_logic;                      -- Transmit data strobe (P)
       -- Clock and Reset
       clk                         : in    std_logic;
       rst_n                       : in    std_logic;
@@ -363,30 +367,37 @@ architecture Testbench of toplevel_testbench is
 
   component crash_ddr_intf is
     generic (
-      CLOCK_FREQ        : integer := 100e6;           -- Clock rate of DDR interface
-      BAUD              : integer := 115200);         -- UART baud rate
+      CLOCK_FREQ        : integer := 100e6;                     -- Clock rate of DDR interface
+      BAUD              : integer := 1e6);                      -- UART baud rate
     port (
-      clk               : in    std_logic;            -- Clock (from ADC)
-      reset             : in    std_logic;            -- Active high reset
-      RX_DATA_CLK_N     : out   std_logic;            -- RX data clock (P)
-      RX_DATA_CLK_P     : out   std_logic;            -- RX data clock (N)
-      RX_DATA_N         : out   std_logic_vector(6 downto 0);  -- RX data (P)
-      RX_DATA_P         : out   std_logic_vector(6 downto 0);  -- RX data (N)
-      TX_DATA_N         : in    std_logic_vector(7 downto 0);  -- TX data (P)
-      TX_DATA_P         : in    std_logic_vector(7 downto 0);  -- TX data (N)
-      UART_RX           : in    std_logic;            -- Control interface from CRASH (RX)
-      adc_channel_a     : in    std_logic_vector(13 downto 0);  -- ADC data channel a, Raw data from ADC
-      adc_channel_b     : in    std_logic_vector(13 downto 0);  -- ADC data channel b, Raw data from ADC
-      adc_i             : in    std_logic_vector(23 downto 0);  -- ADC data I, With DC offset correction & IQ Balance
-      adc_q             : in    std_logic_vector(23 downto 0);  -- ADC data Q, With DC offset correction & IQ Balance
-      dac_channel_a_in  : in    std_logic_vector(15 downto 0);  -- DAC data channel a from USRP (for muxing purposes)
-      dac_channel_b_in  : in    std_logic_vector(15 downto 0);  -- DAC data channel b from USRP (for muxing purposes)
-      dac_i_in          : in    std_logic_vector(23 downto 0);  -- DAC data I from USRP (for muxing purposes)
-      dac_q_in          : in    std_logic_vector(23 downto 0);  -- DAC data Q from USRP (for muxing purposes)
-      dac_channel_a     : out   std_logic_vector(15 downto 0);  -- DAC data channel a, Raw data to DAC
-      dac_channel_b     : out   std_logic_vector(15 downto 0);  -- DAC data channel b, Raw data to DAC
-      dac_i             : out   std_logic_vector(23 downto 0);  -- DAC data I, USRP corrects DC offset correction & IQ Balance
-      dac_q             : out   std_logic_vector(23 downto 0)); -- DAC data Q, USRP corrects DC offset correction & IQ Balance
+      clk               : in    std_logic;                      -- Clock (from ADC)
+      reset             : in    std_logic;                      -- Active high reset
+      RX_DATA_CLK_N     : out   std_logic;                      -- RX data clock (P)
+      RX_DATA_CLK_P     : out   std_logic;                      -- RX data clock (N)
+      RX_DATA_N         : out   std_logic_vector(4 downto 0);   -- RX data (P)
+      RX_DATA_P         : out   std_logic_vector(4 downto 0);   -- RX data (N)
+      RX_DATA_STB_N     : out   std_logic;                      -- RX data strobe (N)
+      RX_DATA_STB_P     : out   std_logic;                      -- RX data strobe (N)
+      TX_DATA_N         : in    std_logic_vector(5 downto 0);   -- TX data (P)
+      TX_DATA_P         : in    std_logic_vector(5 downto 0);   -- TX data (N)
+      TX_DATA_STB_N     : in    std_logic;                      -- TX data strobe (N)
+      TX_DATA_STB_P     : in    std_logic;                      -- TX data strobe (N)
+      UART_RX           : in    std_logic;                      -- Control interface from CRUSH (RX)
+      -- CRASH RX data signals
+      adc_i             : in    std_logic_vector(13 downto 0);  -- ADC data I, raw sample data
+      adc_q             : in    std_logic_vector(13 downto 0);  -- ADC data Q, raw sample data
+      adc_dc_off_i      : in    std_logic_vector(23 downto 0);  -- ADC data I, with DC offset correction & IQ balance
+      adc_dc_off_q      : in    std_logic_vector(23 downto 0);  -- ADC data Q, with DC offset correction & IQ balance
+      -- Following signals come from USRP firmware and are used when bypassing CRASH functionality
+      dac_usrp_i        : in    std_logic_vector(15 downto 0);  -- DAC data I from USRP, raw sample data
+      dac_usrp_q        : in    std_logic_vector(15 downto 0);  -- DAC data Q from USRP, raw sample data
+      dac_usrp_dc_off_i : in    std_logic_vector(23 downto 0);  -- DAC data I from USRP, before DC offset correction & IQ balance
+      dac_usrp_dc_off_q : in    std_logic_vector(23 downto 0);  -- DAC data Q from USRP, before DC offset correction & IQ balance
+      -- CRASH TX data signals
+      dac_i             : out   std_logic_vector(15 downto 0);  -- DAC data I, raw sample data
+      dac_q             : out   std_logic_vector(15 downto 0);  -- DAC data Q, raw sample data
+      dac_dc_off_i      : out   std_logic_vector(23 downto 0);  -- DAC data I, before DC offset correction & IQ balance
+      dac_dc_off_q      : out   std_logic_vector(23 downto 0)); -- DAC data Q, before DC offset correction & IQ balance
   end component;
 
   -----------------------------------------------------------------------------
@@ -410,23 +421,25 @@ architecture Testbench of toplevel_testbench is
   constant REG_TXRX_MMCM_PHASE_INIT : std_logic_vector(31 downto 0) := x"00000008";
   constant REG_TXRX_MMCM_PHASE_ADJ  : std_logic_vector(31 downto 0) := x"00000009";
   constant REG_MISC                 : std_logic_vector(31 downto 0) := x"0000000A";
+  -- Crash commands
+  constant CMD_TX_MODE              : std_logic_vector(3 downto 0) := x"1";
+  constant CMD_RX_MODE              : std_logic_vector(3 downto 0) := x"2";
     -- RX modes (lower nibble)
   constant RX_ADC_RAW_MODE          : std_logic_vector(3 downto 0) := x"0";
-  constant RX_ADC_DSP_MODE          : std_logic_vector(3 downto 0) := x"1";
+  constant RX_ADC_DC_OFF_MODE       : std_logic_vector(3 downto 0) := x"1";
   constant RX_SINE_TEST_MODE        : std_logic_vector(3 downto 0) := x"2";
   constant RX_TEST_PATTERN_MODE     : std_logic_vector(3 downto 0) := x"3";
   constant RX_ALL_1s_MODE           : std_logic_vector(3 downto 0) := x"4";
   constant RX_ALL_0s_MODE           : std_logic_vector(3 downto 0) := x"5";
-  constant RX_CHA_1s_CHB_0s_MODE    : std_logic_vector(3 downto 0) := x"6";
-  constant RX_CHA_0s_CHB_1s_MODE    : std_logic_vector(3 downto 0) := x"7";
+  constant RX_I_1s_Q_0s_MODE        : std_logic_vector(3 downto 0) := x"6";
+  constant RX_I_0s_Q_1s_MODE        : std_logic_vector(3 downto 0) := x"7";
   constant RX_CHECK_ALIGN_MODE      : std_logic_vector(3 downto 0) := x"8";
   constant RX_TX_LOOPBACK_MODE      : std_logic_vector(3 downto 0) := x"9";
   -- TX modes (upper nibble)
   constant TX_PASSTHRU_MODE         : std_logic_vector(3 downto 0) := x"0";
   constant TX_DAC_RAW_MODE          : std_logic_vector(3 downto 0) := x"1";
-  constant TX_DAC_DSP_MODE          : std_logic_vector(3 downto 0) := x"2";
+  constant TX_DAC_DC_OFF_MODE       : std_logic_vector(3 downto 0) := x"2";
   constant TX_SINE_TEST_MODE        : std_logic_vector(3 downto 0) := x"3";
-  constant TX_RX_LOOPBACK_MODE      : std_logic_vector(3 downto 0) := x"4";
 
   -----------------------------------------------------------------------------
   -- Signal Declaration
@@ -616,10 +629,14 @@ architecture Testbench of toplevel_testbench is
   signal UART_TX                    : std_logic;
   signal RX_DATA_CLK_N              : std_logic;
   signal RX_DATA_CLK_P              : std_logic;
-  signal RX_DATA_N                  : std_logic_vector(6 downto 0);
-  signal RX_DATA_P                  : std_logic_vector(6 downto 0);
-  signal TX_DATA_N                  : std_logic_vector(7 downto 0);
-  signal TX_DATA_P                  : std_logic_vector(7 downto 0);
+  signal RX_DATA_N                  : std_logic_vector(4 downto 0);
+  signal RX_DATA_P                  : std_logic_vector(4 downto 0);
+  signal RX_DATA_STB_N              : std_logic;
+  signal RX_DATA_STB_P              : std_logic;
+  signal TX_DATA_N                  : std_logic_vector(5 downto 0);
+  signal TX_DATA_P                  : std_logic_vector(5 downto 0);
+  signal TX_DATA_STB_N              : std_logic;
+  signal TX_DATA_STB_P              : std_logic;
   signal rx_enable_aux              : std_logic;
   signal tx_enable_aux              : std_logic;
   signal threshold_not_exceeded     : std_logic;
@@ -628,25 +645,29 @@ architecture Testbench of toplevel_testbench is
   signal threshold_exceeded_stb     : std_logic;
   signal trigger_stb                : std_logic;
 
-  signal adc_channel_a            : std_logic_vector(13 downto 0);
-  signal adc_channel_b            : std_logic_vector(13 downto 0);
-  signal adc_i                    : std_logic_vector(23 downto 0);
-  signal adc_q                    : std_logic_vector(23 downto 0);
-  signal dac_channel_a_in         : std_logic_vector(15 downto 0);
-  signal dac_channel_b_in         : std_logic_vector(15 downto 0);
-  signal dac_i_in                 : std_logic_vector(23 downto 0);
-  signal dac_q_in                 : std_logic_vector(23 downto 0);
-  signal dac_channel_a            : std_logic_vector(15 downto 0);
-  signal dac_channel_b            : std_logic_vector(15 downto 0);
-  signal dac_i                    : std_logic_vector(23 downto 0);
-  signal dac_q                    : std_logic_vector(23 downto 0);
+  signal adc_i                    : std_logic_vector(13 downto 0);
+  signal adc_q                    : std_logic_vector(13 downto 0);
+  signal adc_dc_off_i             : std_logic_vector(23 downto 0);
+  signal adc_dc_off_q             : std_logic_vector(23 downto 0);
+  signal dac_usrp_i               : std_logic_vector(15 downto 0);
+  signal dac_usrp_q               : std_logic_vector(15 downto 0);
+  signal dac_usrp_dc_off_i        : std_logic_vector(23 downto 0);
+  signal dac_usrp_dc_off_q        : std_logic_vector(23 downto 0);
+  signal dac_i                    : std_logic_vector(15 downto 0);
+  signal dac_q                    : std_logic_vector(15 downto 0);
+  signal dac_dc_off_i             : std_logic_vector(23 downto 0);
+  signal dac_dc_off_q             : std_logic_vector(23 downto 0);
 
   signal RX_DATA_CLK_N_wire_dly   : std_logic;
   signal RX_DATA_CLK_P_wire_dly   : std_logic;
-  signal RX_DATA_N_wire_dly       : std_logic_vector(6 downto 0);
-  signal RX_DATA_P_wire_dly       : std_logic_vector(6 downto 0);
-  signal TX_DATA_N_wire_dly       : std_logic_vector(7 downto 0);
-  signal TX_DATA_P_wire_dly       : std_logic_vector(7 downto 0);
+  signal RX_DATA_N_wire_dly       : std_logic_vector(4 downto 0);
+  signal RX_DATA_P_wire_dly       : std_logic_vector(4 downto 0);
+  signal RX_DATA_STB_N_wire_dly   : std_logic;
+  signal RX_DATA_STB_P_wire_dly   : std_logic;
+  signal TX_DATA_N_wire_dly       : std_logic_vector(5 downto 0);
+  signal TX_DATA_P_wire_dly       : std_logic_vector(5 downto 0);
+  signal TX_DATA_STB_N_wire_dly   : std_logic;
+  signal TX_DATA_STB_P_wire_dly   : std_logic;
 
   type slv_8192x64 is array(0 to 8192) of std_logic_vector(63 downto 0);
   signal ram                      : slv_8192x64 := (others=>(others=>'0'));
@@ -917,8 +938,12 @@ begin
       RX_DATA_CLK_P                             => RX_DATA_CLK_P_wire_dly,
       RX_DATA_N                                 => RX_DATA_N_wire_dly,
       RX_DATA_P                                 => RX_DATA_P_wire_dly,
+      RX_DATA_STB_N                             => RX_DATA_STB_N_wire_dly,
+      RX_DATA_STB_P                             => RX_DATA_STB_P_wire_dly,
       TX_DATA_N                                 => TX_DATA_N,
       TX_DATA_P                                 => TX_DATA_P,
+      TX_DATA_STB_N                             => TX_DATA_STB_N,
+      TX_DATA_STB_P                             => TX_DATA_STB_P,
       clk                                       => axis_clk,
       rst_n                                     => rst_glb_n,
       status_addr                               => status_1_addr,
@@ -1046,31 +1071,39 @@ begin
       reset                       => reset,
       RX_DATA_CLK_N               => RX_DATA_CLK_N,
       RX_DATA_CLK_P               => RX_DATA_CLK_P,
-      RX_DATA_N                   => RX_DATA_N(6 downto 0),
-      RX_DATA_P                   => RX_DATA_P(6 downto 0),
+      RX_DATA_N                   => RX_DATA_N,
+      RX_DATA_P                   => RX_DATA_P,
+      RX_DATA_STB_N               => RX_DATA_STB_N,
+      RX_DATA_STB_P               => RX_DATA_STB_P,
       TX_DATA_N                   => TX_DATA_N_wire_dly,
       TX_DATA_P                   => TX_DATA_P_wire_dly,
+      TX_DATA_STB_N               => TX_DATA_STB_N_wire_dly,
+      TX_DATA_STB_P               => TX_DATA_STB_P_wire_dly,
       UART_RX                     => UART_TX,
-      adc_channel_a               => adc_channel_a,
-      adc_channel_b               => adc_channel_b,
       adc_i                       => adc_i,
       adc_q                       => adc_q,
-      dac_channel_a_in            => dac_channel_a_in,
-      dac_channel_b_in            => dac_channel_b_in,
-      dac_i_in                    => dac_i_in,
-      dac_q_in                    => dac_q_in,
-      dac_channel_a               => dac_channel_a,
-      dac_channel_b               => dac_channel_b,
+      adc_dc_off_i                => adc_dc_off_i,
+      adc_dc_off_q                => adc_dc_off_q,
+      dac_usrp_i                  => dac_usrp_i,
+      dac_usrp_q                  => dac_usrp_q,
+      dac_usrp_dc_off_i           => dac_usrp_dc_off_i,
+      dac_usrp_dc_off_q           => dac_usrp_dc_off_q,
       dac_i                       => dac_i,
-      dac_q                       => dac_q);
+      dac_q                       => dac_q,
+      dac_dc_off_i                => dac_dc_off_i,
+      dac_dc_off_q                => dac_dc_off_q);
 
   -- Simulate delay due to MICTOR cable
   RX_DATA_CLK_N_wire_dly    <= transport RX_DATA_CLK_N after 13 ns;
   RX_DATA_CLK_P_wire_dly    <= transport RX_DATA_CLK_P after 13 ns;
   RX_DATA_N_wire_dly        <= transport RX_DATA_N after 11 ns;
   RX_DATA_P_wire_dly        <= transport RX_DATA_P after 11 ns;
+  RX_DATA_STB_N_wire_dly    <= transport RX_DATA_STB_N after 11 ns;
+  RX_DATA_STB_P_wire_dly    <= transport RX_DATA_STB_P after 11 ns;
   TX_DATA_N_wire_dly        <= transport TX_DATA_N after 11 ns;
   TX_DATA_P_wire_dly        <= transport TX_DATA_P after 11 ns;
+  TX_DATA_STB_N_wire_dly    <= transport TX_DATA_STB_N after 11 ns;
+  TX_DATA_STB_P_wire_dly    <= transport TX_DATA_STB_P after 11 ns;
 
   -------------------------------------------------------------------------------
   -- Create ADC Data
@@ -1078,20 +1111,20 @@ begin
   proc_create_adc_data : process
     variable PHASE_ACCUM  : real := 0.0;
   begin
-    adc_channel_a         <= (others=>'0');
     adc_i                 <= (others=>'0');
-    adc_channel_b         <= (others=>'0');
     adc_q                 <= (others=>'0');
+    adc_dc_off_i          <= (others=>'0');
+    adc_dc_off_q          <= (others=>'0');
     wait until reset = '1';
     loop
       PHASE_ACCUM         := PHASE_ACCUM + 2.0*MATH_PI*0.5/100.0;   -- 500 KHz off center freq
       if (PHASE_ACCUM > 2.0*MATH_PI) then
         PHASE_ACCUM       := PHASE_ACCUM - 2.0*MATH_PI;
       end if;
-      adc_channel_a       <= std_logic_vector(to_signed(integer(round((2.0**13.0-1.0)*cos(PHASE_ACCUM))),14));
-      adc_channel_b       <= std_logic_vector(to_signed(integer(round((2.0**13.0-1.0)*sin(PHASE_ACCUM))),14));
-      adc_i               <= std_logic_vector(to_signed(integer(round((2.0**13.0-1.0)*cos(PHASE_ACCUM))),24));
-      adc_q               <= std_logic_vector(to_signed(integer(round((2.0**13.0-1.0)*sin(PHASE_ACCUM))),24));
+      adc_i               <= std_logic_vector(to_signed(integer(round((2.0**13.0-1.0)*cos(PHASE_ACCUM))),14));
+      adc_q               <= std_logic_vector(to_signed(integer(round((2.0**13.0-1.0)*sin(PHASE_ACCUM))),14));
+      adc_dc_off_i        <= std_logic_vector(to_signed(integer(round((2.0**13.0-1.0)*cos(PHASE_ACCUM))),24));
+      adc_dc_off_q        <= std_logic_vector(to_signed(integer(round((2.0**13.0-1.0)*sin(PHASE_ACCUM))),24));
       wait until clk_100MHz = '1';
     end loop;
   end process;
@@ -1102,20 +1135,20 @@ begin
   proc_create_dac_data : process
     variable PHASE_ACCUM  : real := 0.0;
   begin
-    dac_channel_a_in      <= (others=>'0');
-    dac_channel_b_in      <= (others=>'0');
-    dac_i_in              <= (others=>'0');
-    dac_q_in              <= (others=>'0');
+    dac_usrp_i            <= (others=>'0');
+    dac_usrp_q            <= (others=>'0');
+    dac_usrp_dc_off_i     <= (others=>'0');
+    dac_usrp_dc_off_q     <= (others=>'0');
     wait until reset = '1';
     loop
       PHASE_ACCUM         := PHASE_ACCUM + 2.0*MATH_PI*0.5/100.0;
       if (PHASE_ACCUM > 2.0*MATH_PI) then
         PHASE_ACCUM       := PHASE_ACCUM - 2.0*MATH_PI;
       end if;
-      dac_channel_a_in    <= std_logic_vector(to_signed(integer(round((2.0**15.0-1.0)*cos(PHASE_ACCUM))),16));
-      dac_channel_b_in    <= std_logic_vector(to_signed(integer(round((2.0**15.0-1.0)*sin(PHASE_ACCUM))),16));
-      dac_i_in            <= std_logic_vector(to_signed(integer(round((2.0**15.0-1.0)*cos(PHASE_ACCUM))),24));
-      dac_q_in            <= std_logic_vector(to_signed(integer(round((2.0**15.0-1.0)*sin(PHASE_ACCUM))),24));
+      dac_usrp_i          <= std_logic_vector(to_signed(integer(round((2.0**15.0-1.0)*cos(PHASE_ACCUM))),16));
+      dac_usrp_q          <= std_logic_vector(to_signed(integer(round((2.0**15.0-1.0)*sin(PHASE_ACCUM))),16));
+      dac_usrp_dc_off_i   <= std_logic_vector(to_signed(integer(round((2.0**15.0-1.0)*cos(PHASE_ACCUM))),24));
+      dac_usrp_dc_off_q   <= std_logic_vector(to_signed(integer(round((2.0**15.0-1.0)*sin(PHASE_ACCUM))),24));
       wait until axis_clk = '1';
     end loop;
   end process;
@@ -1303,7 +1336,8 @@ begin
     for i in 0 to 4095 loop
       set_ram                   <= '1';
       set_ram_addr              <= i;
-      set_ram_data              <= (63 downto 48 => dac_channel_a_in(15)) & dac_channel_a_in & (31 downto 16 => dac_channel_b_in(15)) & dac_channel_b_in;
+      -- Useful counter: set_ram_data              <= std_logic_vector(to_unsigned(i,32)) & std_logic_vector(to_unsigned(i+128,32));
+      set_ram_data              <= (63 downto 48 => dac_usrp_i(15)) & dac_usrp_i & (31 downto 16 => dac_usrp_q(15)) & dac_usrp_q;
       wait until axis_clk = '1';
     end loop;
     set_ram                     <= '0';
@@ -1486,13 +1520,21 @@ begin
     set_ctrl                    <= '0';
     wait until set_ctrl_busy = '0';
     wait until axis_clk = '1';
+    -- Set usrp_ddr_interface_axis Control Register Bank 1, USRP Mode
+    --set_ctrl_addr               <= x"01" & x"01";
+    --set_ctrl_data               <= x"000000" & CMD_RX_MODE & RX_TX_LOOPBACK_MODE;   -- USRP Mode
+    --set_ctrl                    <= '1';
+    --wait until set_ctrl_busy = '1';
+    --set_ctrl                    <= '0';
+    --wait until set_ctrl_busy = '0';
+    --wait until axis_clk = '1';
     -- Set MMCM phase values to calibrate MICTOR cable
     set_ctrl_addr               <= x"01" & x"06";
     set_ctrl_data               <= (others=>'0');
     set_ctrl_data(0)            <= '1';                                   -- RX restart calibration
-    set_ctrl_data(10 downto 1)  <= std_logic_vector(to_unsigned(250,10)); -- RX phase
+    set_ctrl_data(10 downto 1)  <= std_logic_vector(to_unsigned(200,10)); -- RX phase
     set_ctrl_data(16)           <= '1';                                   -- TX restart calibration
-    set_ctrl_data(26 downto 17) <= std_logic_vector(to_unsigned(150,10)); -- TX phase
+    set_ctrl_data(26 downto 17) <= std_logic_vector(to_unsigned(450,10)); -- TX phase
     set_ctrl                    <= '1';
     wait until set_ctrl_busy = '1';
     set_ctrl                    <= '0';
@@ -1573,6 +1615,7 @@ begin
     set_ctrl_addr               <= x"01" & x"00";
     set_ctrl_data               <= (others=>'0');
     set_ctrl_data(0)            <= '1';               -- RX Enable
+    --set_ctrl_data(1)            <= '1';               -- TX Enable
     set_ctrl_data(3)            <= '1';               -- TX Enable Aux
     set_ctrl_data(6)            <= '1';               -- RX FIFO Bypass
     set_ctrl_data(31 downto 29) <= "010";             -- Master Tdest

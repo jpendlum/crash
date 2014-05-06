@@ -196,9 +196,12 @@ int main (int argc, char **argv) {
     //printf("TX PHASE INIT: %d\n",crash_read_reg(usrp_intf_tx->regs,USRP_TX_PHASE_INIT));
     while(!crash_get_bit(usrp_intf_tx->regs,USRP_TX_CAL_COMPLETE));
 
-    // Set USRP Mode
+    // Set USRP TX / RX Modes
     while(crash_get_bit(usrp_intf_tx->regs,USRP_UART_BUSY));
-    crash_write_reg(usrp_intf_tx->regs,USRP_USRP_MODE_CTRL,TX_DAC_RAW_MODE + RX_ADC_DSP_MODE);
+    crash_write_reg(usrp_intf_tx->regs,USRP_USRP_MODE_CTRL,CMD_TX_MODE + TX_DAC_RAW_MODE);
+    while(crash_get_bit(usrp_intf_tx->regs,USRP_UART_BUSY));
+    while(crash_get_bit(usrp_intf_tx->regs,USRP_UART_BUSY));
+    crash_write_reg(usrp_intf_tx->regs,USRP_USRP_MODE_CTRL,CMD_RX_MODE + RX_ADC_DSP_MODE);
     while(crash_get_bit(usrp_intf_tx->regs,USRP_UART_BUSY));
 
     // Setup RX path

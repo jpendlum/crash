@@ -27,16 +27,20 @@ use ieee.std_logic_unsigned.all;
 entity usrp_ddr_intf_axis is
   generic (
     DDR_CLOCK_FREQ              : integer := 100e6;       -- Clock rate of DDR interface
-    BAUD                        : integer := 115200);     -- UART baud rate
+    BAUD                        : integer := 1e6);        -- UART baud rate
   port (
     -- USRP Interface
     UART_TX                     : out   std_logic;                      -- UART
     RX_DATA_CLK_N               : in    std_logic;                      -- Receive data clock (N)
     RX_DATA_CLK_P               : in    std_logic;                      -- Receive data clock (P)
-    RX_DATA_N                   : in    std_logic_vector(6 downto 0);   -- Receive data (N)
-    RX_DATA_P                   : in    std_logic_vector(6 downto 0);   -- Receive data (N)
-    TX_DATA_N                   : out   std_logic_vector(7 downto 0);   -- Transmit data (N)
-    TX_DATA_P                   : out   std_logic_vector(7 downto 0);   -- Transmit data (P)
+    RX_DATA_N                   : in    std_logic_vector(4 downto 0);   -- Receive data (N)
+    RX_DATA_P                   : in    std_logic_vector(4 downto 0);   -- Receive data (P)
+    RX_DATA_STB_N               : in    std_logic;                      -- Receive data strobe (N)
+    RX_DATA_STB_P               : in    std_logic;                      -- Receive data strobe (P)
+    TX_DATA_N                   : out   std_logic_vector(5 downto 0);   -- Transmit data (N)
+    TX_DATA_P                   : out   std_logic_vector(5 downto 0);   -- Transmit data (P)
+    TX_DATA_STB_N               : out   std_logic;                      -- Transmit data strobe (N)
+    TX_DATA_STB_P               : out   std_logic;                      -- Transmit data strobe (P)
     -- Clock and Reset
     clk                         : in    std_logic;
     rst_n                       : in    std_logic;
@@ -103,10 +107,14 @@ architecture RTL of usrp_ddr_intf_axis is
       -- Physical Transmit / Receive data interface
       RX_DATA_CLK_N           : in    std_logic;                      -- Receive data clock (N)
       RX_DATA_CLK_P           : in    std_logic;                      -- Receive data clock (P)
-      RX_DATA_N               : in    std_logic_vector(6 downto 0);   -- Receive data (N)
-      RX_DATA_P               : in    std_logic_vector(6 downto 0);   -- Receive data (N)
-      TX_DATA_N               : out   std_logic_vector(7 downto 0);   -- Transmit data (N)
-      TX_DATA_P               : out   std_logic_vector(7 downto 0);   -- Transmit data (P)
+      RX_DATA_N               : in    std_logic_vector(4 downto 0);   -- Receive data (N)
+      RX_DATA_P               : in    std_logic_vector(4 downto 0);   -- Receive data (P)
+      RX_DATA_STB_N           : in    std_logic;                      -- Receive data strobe (N)
+      RX_DATA_STB_P           : in    std_logic;                      -- Receive data strobe (P)
+      TX_DATA_N               : out   std_logic_vector(5 downto 0);   -- Transmit data (N)
+      TX_DATA_P               : out   std_logic_vector(5 downto 0);   -- Transmit data (P)
+      TX_DATA_STB_N           : out   std_logic;                      -- Transmit data strobe (N)
+      TX_DATA_STB_P           : out   std_logic;                      -- Transmit data strobe (P)
       clk_rx_locked           : out   std_logic;                      -- RX data MMCM clock locked
       clk_rx_phase            : out   std_logic_vector(9 downto 0);   -- RX data MMCM phase offset, 0 - 559
       rx_phase_init           : in    std_logic_vector(9 downto 0);   -- RX data MMCM phase offset initialization, 0 - 559
@@ -431,8 +439,12 @@ begin
       RX_DATA_CLK_P                             => RX_DATA_CLK_P,
       RX_DATA_N                                 => RX_DATA_N,
       RX_DATA_P                                 => RX_DATA_P,
+      RX_DATA_STB_N                             => RX_DATA_STB_N,
+      RX_DATA_STB_P                             => RX_DATA_STB_P,
       TX_DATA_N                                 => TX_DATA_N,
       TX_DATA_P                                 => TX_DATA_P,
+      TX_DATA_STB_N                             => TX_DATA_STB_N,
+      TX_DATA_STB_P                             => TX_DATA_STB_P,
       clk_rx_locked                             => clk_rx_locked,
       clk_rx_phase                              => clk_rx_phase,
       rx_phase_init                             => rx_phase_init,
